@@ -371,8 +371,8 @@ export namespace main {
 	    validationError?: string;
 	    tlsVersion: string;
 	    cipherSuite: string;
-	    tls10Accepted: boolean;
-	    tls11Accepted: boolean;
+	    tls10Status: string;
+	    tls11Status: string;
 	    tls10Error?: string;
 	    tls11Error?: string;
 
@@ -395,8 +395,8 @@ export namespace main {
 	        this.validationError = source["validationError"];
 	        this.tlsVersion = source["tlsVersion"];
 	        this.cipherSuite = source["cipherSuite"];
-	        this.tls10Accepted = source["tls10Accepted"];
-	        this.tls11Accepted = source["tls11Accepted"];
+	        this.tls10Status = source["tls10Status"];
+	        this.tls11Status = source["tls11Status"];
 	        this.tls10Error = source["tls10Error"];
 	        this.tls11Error = source["tls11Error"];
 	    }
@@ -421,4 +421,3 @@ export namespace main {
 	}
 
 }
-

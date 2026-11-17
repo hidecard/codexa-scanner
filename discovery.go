@@ -37,24 +37,34 @@ type PathFuzzResult struct {
 	Paths   []PathFinding `json:"paths"`
 	Error   string        `json:"error,omitempty"`
 }
+
+type TLSProbeStatus string
+
+const (
+	TLSProbeSupported       TLSProbeStatus = "supported"
+	TLSProbeNotSupported    TLSProbeStatus = "not_supported"
+	TLSProbeInconclusive    TLSProbeStatus = "inconclusive"
+	tlsAlertProtocolVersion                = 70
+)
+
 type TLSInspection struct {
-	Host            string    `json:"host"`
-	Port            string    `json:"port"`
-	Subject         string    `json:"subject"`
-	Issuer          string    `json:"issuer"`
-	NotBefore       time.Time `json:"notBefore"`
-	NotAfter        time.Time `json:"notAfter"`
-	DaysRemaining   int       `json:"daysRemaining"`
-	SANs            []string  `json:"sans"`
-	SelfSigned      bool      `json:"selfSigned"`
-	Trusted         bool      `json:"trusted"`
-	ValidationError string    `json:"validationError,omitempty"`
-	TLSVersion      string    `json:"tlsVersion"`
-	CipherSuite     string    `json:"cipherSuite"`
-	TLS10Accepted   bool      `json:"tls10Accepted"`
-	TLS11Accepted   bool      `json:"tls11Accepted"`
-	TLS10Error      string    `json:"tls10Error,omitempty"`
-	TLS11Error      string    `json:"tls11Error,omitempty"`
+	Host            string         `json:"host"`
+	Port            string         `json:"port"`
+	Subject         string         `json:"subject"`
+	Issuer          string         `json:"issuer"`
+	NotBefore       time.Time      `json:"notBefore"`
+	NotAfter        time.Time      `json:"notAfter"`
+	DaysRemaining   int            `json:"daysRemaining"`
+	SANs            []string       `json:"sans"`
+	SelfSigned      bool           `json:"selfSigned"`
+	Trusted         bool           `json:"trusted"`
+	ValidationError string         `json:"validationError,omitempty"`
+	TLSVersion      string         `json:"tlsVersion"`
+	CipherSuite     string         `json:"cipherSuite"`
+	TLS10Status     TLSProbeStatus `json:"tls10Status"`
+	TLS11Status     TLSProbeStatus `json:"tls11Status"`
+	TLS10Error      string         `json:"tls10Error,omitempty"`
+	TLS11Error      string         `json:"tls11Error,omitempty"`
 }
 type DNSIntelligenceResult struct {
 	Domain string              `json:"domain"`
@@ -375,26 +385,41 @@ func (a *App) InspectTLS(target string) TLSInspection {
 
 func probeLegacyTLS(out *TLSInspection, host, addr string) {
 	for _, version := range []uint16{tls.VersionTLS10, tls.VersionTLS11} {
-		// This skips trust verification for a handshake-only capability probe;
-		// the result is never used to trust the server or exchange app data.
-		probe := &tls.Config{ServerName: host, MinVersion: version, MaxVersion: version, InsecureSkipVerify: true} //nolint:gosec
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", addr, probe)
-		accepted := err == nil
-		if conn != nil {
-			conn.Close()
-		}
+		status, detail := probeLegacyTLSVersion(host, addr, version)
 		if version == tls.VersionTLS10 {
-			out.TLS10Accepted = accepted
-			if err != nil {
-				out.TLS10Error = "not negotiated by this probe"
-			}
+			out.TLS10Status = status
+			out.TLS10Error = detail
 		} else {
-			out.TLS11Accepted = accepted
-			if err != nil {
-				out.TLS11Error = "not negotiated by this probe"
-			}
+			out.TLS11Status = status
+			out.TLS11Error = detail
 		}
 	}
+}
+
+func probeLegacyTLSVersion(host, addr string, version uint16) (TLSProbeStatus, string) {
+	// This skips trust verification for a handshake-only capability probe;
+	// the result is never used to trust the server or exchange app data.
+	probe := &tls.Config{ServerName: host, MinVersion: version, MaxVersion: version, InsecureSkipVerify: true} //nolint:gosec
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", addr, probe)
+	if err != nil {
+		return classifyLegacyTLSProbe(version, 0, err)
+	}
+	defer conn.Close()
+	return classifyLegacyTLSProbe(version, conn.ConnectionState().Version, nil)
+}
+
+func classifyLegacyTLSProbe(version, negotiatedVersion uint16, err error) (TLSProbeStatus, string) {
+	versionName := tlsVersionName(version)
+	if err == nil {
+		if negotiatedVersion == version {
+			return TLSProbeSupported, ""
+		}
+		return TLSProbeInconclusive, fmt.Sprintf("Probe negotiated %s instead of the requested %s.", tlsVersionName(negotiatedVersion), versionName)
+	}
+	if errors.Is(err, tls.AlertError(tlsAlertProtocolVersion)) {
+		return TLSProbeNotSupported, fmt.Sprintf("TLS peer explicitly rejected %s: %v.", versionName, err)
+	}
+	return TLSProbeInconclusive, fmt.Sprintf("Could not determine whether %s is supported: %v", versionName, err)
 }
 
 func fillTLSCertificate(out *TLSInspection, c *x509.Certificate) {

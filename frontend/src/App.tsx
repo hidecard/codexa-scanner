@@ -174,6 +174,18 @@ export default function App() {
     return 'border-slate-700 bg-slate-800/50 text-slate-300';
   };
 
+  const getTLSProbeLabel = (status: string) => {
+    if (status === 'supported') return 'Supported';
+    if (status === 'not_supported') return 'Not supported';
+    return 'Inconclusive';
+  };
+
+  const getTLSProbeColor = (status: string) => {
+    if (status === 'supported') return 'border-rose-700 bg-rose-950/40 text-rose-300';
+    if (status === 'not_supported') return 'border-emerald-800 bg-emerald-950/40 text-emerald-300';
+    return 'border-amber-800 bg-amber-950/40 text-amber-300';
+  };
+
   const formatHistoryResult = (raw: string) => {
     try { return JSON.stringify(JSON.parse(raw), null, 2); }
     catch { return raw; }
@@ -615,7 +627,7 @@ export default function App() {
             <label className="block text-xs text-slate-400">Authorized hostname or host:port</label>
             <input value={tlsTarget} onChange={(e) => setTlsTarget(e.target.value)} placeholder="example.com:443" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
             <button onClick={runTLSInspector} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting TLS…' : 'Inspect Certificate & Protocols'}</button>
-            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. Certificate details are independently checked against the system trust store; legacy-protocol support depends on local Go crypto policy.</p>
+            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. “Not supported” requires an explicit TLS protocol_version alert; connection, handshake, and local-policy errors are “Inconclusive.” Certificate details are independently checked against the system trust store.</p>
           </div>
           {tlsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <h2 className="break-all text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
@@ -626,7 +638,21 @@ export default function App() {
               {tlsResult.subject && <div className="rounded bg-slate-950 p-3">Subject: {tlsResult.subject}<br />Issuer: {tlsResult.issuer}</div>}
               {tlsResult.notAfter && <div className="rounded bg-slate-950 p-3">Expires: {new Date(tlsResult.notAfter).toLocaleString()} · {tlsResult.daysRemaining} day(s) remaining</div>}
             </div>
-            <div className="flex flex-wrap gap-2 text-xs"><span className={`rounded border px-2 py-1 ${tlsResult.tls10Accepted ? 'border-rose-700 text-rose-300' : 'border-emerald-800 text-emerald-300'}`}>TLS 1.0 {tlsResult.tls10Accepted ? 'accepted' : 'not negotiated'}</span><span className={`rounded border px-2 py-1 ${tlsResult.tls11Accepted ? 'border-rose-700 text-rose-300' : 'border-emerald-800 text-emerald-300'}`}>TLS 1.1 {tlsResult.tls11Accepted ? 'accepted' : 'not negotiated'}</span></div>
+            {(tlsResult.tls10Status || tlsResult.tls11Status) && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { label: 'TLS 1.0', status: tlsResult.tls10Status, error: tlsResult.tls10Error },
+                  { label: 'TLS 1.1', status: tlsResult.tls11Status, error: tlsResult.tls11Error },
+                ].map((probe) => (
+                  <div key={probe.label} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                    <span className={`inline-flex rounded border px-2 py-1 text-xs font-semibold ${getTLSProbeColor(probe.status)}`}>
+                      {probe.label} · {getTLSProbeLabel(probe.status)}
+                    </span>
+                    {probe.error && <p className="mt-2 break-all text-[11px] leading-relaxed text-slate-400">{probe.error}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
             <div><div className="mb-1 text-xs font-semibold text-slate-400">Certificate SANs</div><div className="flex flex-wrap gap-1">{tlsResult.sans.map((name) => <span key={name} className="rounded bg-slate-950 px-2 py-1 font-mono text-[11px]">{name}</span>)}</div></div>
           </div>}
         </div>

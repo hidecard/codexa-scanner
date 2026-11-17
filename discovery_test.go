@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +61,79 @@ func TestInspectTLSPresentsSelfSignedCertificateAsUntrusted(t *testing.T) {
 	}
 	if result.TLSVersion == "" || len(result.SANs) == 0 {
 		t.Fatalf("expected negotiated protocol and certificate SANs, got %+v", result)
+	}
+	for _, probe := range []struct {
+		name   string
+		status TLSProbeStatus
+		detail string
+	}{
+		{name: "TLS 1.0", status: result.TLS10Status, detail: result.TLS10Error},
+		{name: "TLS 1.1", status: result.TLS11Status, detail: result.TLS11Error},
+	} {
+		if probe.status != TLSProbeSupported && probe.status != TLSProbeNotSupported && probe.status != TLSProbeInconclusive {
+			t.Errorf("%s probe has invalid status %q", probe.name, probe.status)
+		}
+		if probe.status != TLSProbeSupported && probe.detail == "" {
+			t.Errorf("%s non-supported/inconclusive probe should include a useful explanation", probe.name)
+		}
+	}
+}
+
+func TestClassifyLegacyTLSProbe(t *testing.T) {
+	tests := []struct {
+		name              string
+		negotiatedVersion uint16
+		err               error
+		wantStatus        TLSProbeStatus
+		wantDetail        string
+	}{
+		{
+			name:              "exact version handshake means supported",
+			negotiatedVersion: tls.VersionTLS10,
+			wantStatus:        TLSProbeSupported,
+		},
+		{
+			name:              "unexpected negotiated version is inconclusive",
+			negotiatedVersion: tls.VersionTLS12,
+			wantStatus:        TLSProbeInconclusive,
+			wantDetail:        "instead of the requested TLS 1.0",
+		},
+		{
+			name:       "explicit protocol version alert means not supported",
+			err:        tls.AlertError(tlsAlertProtocolVersion),
+			wantStatus: TLSProbeNotSupported,
+			wantDetail: "explicitly rejected TLS 1.0",
+		},
+		{
+			name:       "handshake failure alert is inconclusive",
+			err:        tls.AlertError(40),
+			wantStatus: TLSProbeInconclusive,
+			wantDetail: "handshake failure",
+		},
+		{
+			name:       "network error is inconclusive",
+			err:        errors.New("dial tcp: i/o timeout"),
+			wantStatus: TLSProbeInconclusive,
+			wantDetail: "i/o timeout",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			status, detail := classifyLegacyTLSProbe(tls.VersionTLS10, test.negotiatedVersion, test.err)
+			if status != test.wantStatus {
+				t.Fatalf("expected status %q, got %q (detail %q)", test.wantStatus, status, detail)
+			}
+			if test.wantDetail != "" && !strings.Contains(detail, test.wantDetail) {
+				t.Fatalf("expected detail to contain %q, got %q", test.wantDetail, detail)
+			}
+			if status == TLSProbeSupported && detail != "" {
+				t.Fatalf("supported probe should not have an error, got %q", detail)
+			}
+			if status != TLSProbeSupported && detail == "" {
+				t.Fatal("non-supported/inconclusive result should include an explanation")
+			}
+		})
 	}
 }
 
