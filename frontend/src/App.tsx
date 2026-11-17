@@ -64,9 +64,16 @@ export default function App() {
       setProgress(pct);
     });
 
-    EventsOn('scan:done', () => {
+    EventsOn('scan:done', (status: string) => {
       setIsScanning(false);
-      setProgress(100);
+      if (status === 'completed') {
+        setProgress(100);
+      } else if (status === 'cancelled') {
+        setProgress((current) => Math.min(current, 99));
+        setScanError('Scan cancelled.');
+      } else if (status === 'failed') {
+        setScanError('Scan failed unexpectedly. Check the application log for details.');
+      }
     });
 
     return () => {
@@ -98,7 +105,6 @@ export default function App() {
 
   const handleStopScan = async () => {
     await StopPortScan();
-    setIsScanning(false);
   };
 
   const handleBulkAnalyze = async () => {
@@ -244,9 +250,11 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Workers</label>
+              <label className="block text-xs text-slate-400 mb-1">Workers (max 512)</label>
               <input
                 type="number"
+                min={1}
+                max={512}
                 value={workers}
                 onChange={(e) => setWorkers(Number(e.target.value))}
                 disabled={isScanning}
@@ -255,9 +263,11 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Timeout (ms)</label>
+              <label className="block text-xs text-slate-400 mb-1">Timeout (ms, max 30,000)</label>
               <input
                 type="number"
+                min={1}
+                max={30000}
                 value={timeoutMs}
                 onChange={(e) => setTimeoutMs(Number(e.target.value))}
                 disabled={isScanning}

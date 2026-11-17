@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -133,4 +136,127 @@ func TestAnalyzeURLReportsPlainHTTP(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected high-severity cleartext-transport finding, got %+v", result.Findings)
+}
+
+func TestNormalizePortScanLimits(t *testing.T) {
+	workers, timeout := normalizePortScanLimits(1000, 10_000, 90_000)
+	if workers != maxScanWorkers {
+		t.Errorf("workers should be capped at %d, got %d", maxScanWorkers, workers)
+	}
+	if timeout != 30*time.Second {
+		t.Errorf("timeout should be capped at 30 seconds, got %s", timeout)
+	}
+
+	workers, _ = normalizePortScanLimits(8, 10, 1000)
+	if workers != 8 {
+		t.Errorf("workers should be capped to port count, got %d", workers)
+	}
+
+	workers, timeout = normalizePortScanLimits(1000, 0, 0)
+	if workers != defaultScanWorkers || timeout != time.Duration(defaultScanTimeout)*time.Millisecond {
+		t.Errorf("non-positive values should use defaults, got %d workers and %s", workers, timeout)
+	}
+}
+
+func TestStopPortScanCancelsBannerReadAndIsConcurrencySafe(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for scan fixture: %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+
+	address := listener.Addr().(*net.TCPAddr)
+	app := &App{}
+	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 30_000); status != "STARTED" {
+		t.Fatalf("start scan: %s", status)
+	}
+
+	var scan *portScan
+	deadline := time.After(2 * time.Second)
+	for scan == nil {
+		app.scanMu.Lock()
+		scan = app.activeScan
+		app.scanMu.Unlock()
+		if scan != nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("scan did not become active")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if scan.status != scanStatusRunning {
+		t.Fatalf("active scan should report running, got %q", scan.status)
+	}
+	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 100); status != "A scan is already running or stopping" {
+		t.Fatalf("second scan should be rejected while one is active, got %q", status)
+	}
+
+	var serverConn net.Conn
+	select {
+	case serverConn = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not connect to the fixture listener")
+	}
+	defer serverConn.Close()
+
+	var stops sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		stops.Add(1)
+		go func() {
+			defer stops.Done()
+			app.StopPortScan()
+		}()
+	}
+	stops.Wait()
+
+	select {
+	case <-scan.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel did not interrupt the active banner read")
+	}
+	if scan.status != scanStatusCancelled {
+		t.Fatalf("stopped scan should report cancelled, got %q", scan.status)
+	}
+	app.scanMu.Lock()
+	active := app.activeScan
+	app.scanMu.Unlock()
+	if active != nil {
+		t.Fatal("completed scan should be removed from active state")
+	}
+}
+
+func TestPortScanReportsCompletedStatus(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a closed local port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved port: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scan := &portScan{ctx: ctx, cancel: cancel, done: make(chan struct{}), status: scanStatusRunning}
+	app := &App{activeScan: scan}
+	go app.runPortScan(scan, "127.0.0.1", port, port, 1, 100*time.Millisecond)
+
+	select {
+	case <-scan.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scan did not finish")
+	}
+	if scan.status != scanStatusCompleted {
+		t.Fatalf("finished scan should report completed, got %q", scan.status)
+	}
 }

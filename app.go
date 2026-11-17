@@ -29,9 +29,33 @@ import (
 
 type App struct {
 	ctx        context.Context
-	scanCancel context.CancelFunc
+	scanMu     sync.Mutex
+	activeScan *portScan
+	nextScanID uint64
 	historyDB  *sql.DB
 }
+
+type portScan struct {
+	id     uint64
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	status scanStatus
+}
+
+type scanStatus string
+
+const (
+	scanStatusRunning   scanStatus = "running"
+	scanStatusCompleted scanStatus = "completed"
+	scanStatusCancelled scanStatus = "cancelled"
+	scanStatusFailed    scanStatus = "failed"
+
+	defaultScanWorkers = 150
+	maxScanWorkers     = 512
+	defaultScanTimeout = 800
+	maxScanTimeout     = 30_000
+)
 
 func NewApp() *App {
 	return &App{}
@@ -82,7 +106,10 @@ var commonPorts = map[int]string{
 	8080: "HTTP-Proxy", 8443: "HTTPS-Alt", 27017: "MongoDB",
 }
 
-func grabBanner(conn net.Conn, target string, port int) string {
+func grabBanner(ctx context.Context, conn net.Conn, target string, port int) string {
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopClose()
+	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
 
 	// HTTP/HTTPS port ဖြစ်နေရင် HEAD request လှမ်းပို့ပြီး Server header ယူမယ်
@@ -116,105 +143,155 @@ func grabBanner(conn net.Conn, target string, port int) string {
 }
 
 func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutMs int) string {
+	if a == nil {
+		return "Scanner unavailable"
+	}
+	target = strings.TrimSpace(target)
 	if target == "" {
 		return "Target is required"
 	}
 	if startPort < 1 || endPort > 65535 || startPort > endPort {
 		return "Invalid port range (1-65535)"
 	}
-	if workers <= 0 {
-		workers = 150
+	workers, timeout := normalizePortScanLimits(endPort-startPort+1, workers, timeoutMs)
+
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
 	}
-	if timeoutMs <= 0 {
-		timeoutMs = 800
+	ctx, cancel := context.WithCancel(parent)
+	a.scanMu.Lock()
+	if a.activeScan != nil {
+		a.scanMu.Unlock()
+		cancel()
+		return "A scan is already running or stopping"
 	}
+	a.nextScanID++
+	scan := &portScan{id: a.nextScanID, ctx: ctx, cancel: cancel, done: make(chan struct{}), status: scanStatusRunning}
+	a.activeScan = scan
+	a.scanMu.Unlock()
 
-	// အရင် Scan run နေတာရှိရင် အရင်ရပ်မယ်
-	if a.scanCancel != nil {
-		a.scanCancel()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	a.scanCancel = cancel
-
-	totalPorts := endPort - startPort + 1
-	var scannedCount int64
-
-	go func() {
-		defer cancel()
-		ports := make(chan int, workers)
-		var wg sync.WaitGroup
-		var findingsMu sync.Mutex
-		var scanFindings []PortFinding
-		timeout := time.Duration(timeoutMs) * time.Millisecond
-
-		// Worker Pool စတင်ခြင်း
-		for i := 0; i < workers; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for p := range ports {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-						address := fmt.Sprintf("%s:%d", target, p)
-						conn, err := net.DialTimeout("tcp", address, timeout)
-						if err == nil {
-							banner := grabBanner(conn, target, p)
-							conn.Close()
-
-							svc := commonPorts[p]
-							if svc == "" {
-								svc = "unknown"
-							}
-							finding := PortFinding{Port: p, Service: svc, Banner: banner}
-							findingsMu.Lock()
-							scanFindings = append(scanFindings, finding)
-							findingsMu.Unlock()
-
-							// Notify the frontend as soon as an open port is found.
-							runtime.EventsEmit(a.ctx, "port:found", finding)
-						}
-
-						curr := atomic.AddInt64(&scannedCount, 1)
-						// UI ကိုဝန်မပိစေဖို့ port 25 ခုတစ်ခါ Progress update ပို့မယ်
-						if curr%25 == 0 || int(curr) == totalPorts {
-							pct := int((float64(curr) / float64(totalPorts)) * 100)
-							runtime.EventsEmit(a.ctx, "scan:progress", pct)
-						}
-					}
-				}
-			}()
-		}
-
-		// Ports တွေကို Channel ထဲ ထည့်ခြင်း
-	Loop:
-		for p := startPort; p <= endPort; p++ {
-			select {
-			case <-ctx.Done():
-				break Loop
-			case ports <- p:
-			}
-		}
-		close(ports)
-		wg.Wait()
-		findingsMu.Lock()
-		snapshot := append([]PortFinding(nil), scanFindings...)
-		findingsMu.Unlock()
-		if err := a.saveHistory("port", target, snapshot); err != nil {
-			log.Printf("Codexa Scanner: saving port scan history: %v", err)
-		}
-
-		runtime.EventsEmit(a.ctx, "scan:done", true)
-	}()
-
+	a.emitScanEvent("scan:status", string(scanStatusRunning))
+	go a.runPortScan(scan, target, startPort, endPort, workers, timeout)
 	return "STARTED"
 }
 
+func normalizePortScanLimits(totalPorts, workers, timeoutMs int) (int, time.Duration) {
+	if workers <= 0 {
+		workers = defaultScanWorkers
+	}
+	if workers > maxScanWorkers {
+		workers = maxScanWorkers
+	}
+	if totalPorts > 0 && workers > totalPorts {
+		workers = totalPorts
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = defaultScanTimeout
+	}
+	if timeoutMs > maxScanTimeout {
+		timeoutMs = maxScanTimeout
+	}
+	return workers, time.Duration(timeoutMs) * time.Millisecond
+}
+
+func (a *App) emitScanEvent(event string, data any) {
+	if a != nil && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, event, data)
+	}
+}
+
+func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, workers int, timeout time.Duration) {
+	totalPorts := endPort - startPort + 1
+	var scannedCount int64
+	var wg sync.WaitGroup
+	var findingsMu sync.Mutex
+	var scanFindings []PortFinding
+	ports := make(chan int, workers)
+	dialer := &net.Dialer{Timeout: timeout}
+
+	status := scanStatusCompleted
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			status = scanStatusFailed
+			log.Printf("Codexa Scanner: port scan %d failed: %v", scan.id, recovered)
+		}
+		if scan.ctx.Err() != nil && status != scanStatusFailed {
+			status = scanStatusCancelled
+		}
+		if status == scanStatusCompleted {
+			findingsMu.Lock()
+			snapshot := append([]PortFinding(nil), scanFindings...)
+			findingsMu.Unlock()
+			if err := a.saveHistory("port", target, snapshot); err != nil {
+				log.Printf("Codexa Scanner: saving port scan history: %v", err)
+			}
+		}
+		scan.status = status
+		scan.cancel()
+		a.emitScanEvent("scan:status", string(status))
+		a.emitScanEvent("scan:done", string(status))
+		a.scanMu.Lock()
+		if a.activeScan == scan {
+			a.activeScan = nil
+		}
+		a.scanMu.Unlock()
+		close(scan.done)
+	}()
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for port := range ports {
+				if scan.ctx.Err() != nil {
+					return
+				}
+				address := net.JoinHostPort(target, strconv.Itoa(port))
+				conn, err := dialer.DialContext(scan.ctx, "tcp", address)
+				if err == nil {
+					banner := grabBanner(scan.ctx, conn, target, port)
+					svc := commonPorts[port]
+					if svc == "" {
+						svc = "unknown"
+					}
+					finding := PortFinding{Port: port, Service: svc, Banner: banner}
+					findingsMu.Lock()
+					scanFindings = append(scanFindings, finding)
+					findingsMu.Unlock()
+					a.emitScanEvent("port:found", finding)
+				}
+
+				curr := atomic.AddInt64(&scannedCount, 1)
+				if scan.ctx.Err() == nil && (curr%25 == 0 || int(curr) == totalPorts) {
+					pct := int((float64(curr) / float64(totalPorts)) * 100)
+					a.emitScanEvent("scan:progress", pct)
+				}
+			}
+		}()
+	}
+
+Loop:
+	for port := startPort; port <= endPort; port++ {
+		select {
+		case <-scan.ctx.Done():
+			break Loop
+		case ports <- port:
+		}
+	}
+	close(ports)
+	wg.Wait()
+}
+
 func (a *App) StopPortScan() {
-	if a.scanCancel != nil {
-		a.scanCancel()
+	if a == nil {
+		return
+	}
+	a.scanMu.Lock()
+	scan := a.activeScan
+	a.scanMu.Unlock()
+	if scan != nil {
+		scan.cancel()
 	}
 }
 
