@@ -5,12 +5,18 @@ import {
   AnalyzeBulkURLs,
   ExportJSON,
   ExportPortsCSV,
+  EnumerateSubdomains,
+  FuzzPaths,
+  InspectTLS,
+  DNSIntelligence,
+  GetScanHistory,
+  DiffLatestPortScans,
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'scanner' | 'analyzer'>('scanner');
+  const [activeTab, setActiveTab] = useState<'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'history'>('scanner');
 
   // --- Port Scanner States ---
   const [target, setTarget] = useState('scanme.nmap.org');
@@ -28,6 +34,25 @@ export default function App() {
   const [httpThreads, setHttpThreads] = useState(10);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [httpResults, setHttpResults] = useState<main.BulkHeaderResult[]>([]);
+
+  // --- Authorized recon modules ---
+  const [subdomain, setSubdomain] = useState('example.com');
+  const [subdomainWordlist, setSubdomainWordlist] = useState('www\napi\nmail\ndev\nstaging');
+  const [useDNSBrute, setUseDNSBrute] = useState(false);
+  const [subdomainResult, setSubdomainResult] = useState<main.SubdomainResult | null>(null);
+  const [fuzzBaseURL, setFuzzBaseURL] = useState('https://example.com');
+  const [fuzzWordlist, setFuzzWordlist] = useState('/admin\n/dashboard\n/robots.txt\n/.well-known/security.txt');
+  const [fuzzConcurrency, setFuzzConcurrency] = useState(5);
+  const [fuzzResult, setFuzzResult] = useState<main.PathFuzzResult | null>(null);
+  const [tlsTarget, setTlsTarget] = useState('example.com:443');
+  const [tlsResult, setTlsResult] = useState<main.TLSInspection | null>(null);
+  const [dnsDomain, setDnsDomain] = useState('example.com');
+  const [includeRDAP, setIncludeRDAP] = useState(false);
+  const [dnsResult, setDnsResult] = useState<main.DNSIntelligenceResult | null>(null);
+  const [historyTarget, setHistoryTarget] = useState('scanme.nmap.org');
+  const [historyEntries, setHistoryEntries] = useState<main.HistoryEntry[]>([]);
+  const [portDiff, setPortDiff] = useState<main.PortScanDiff | null>(null);
+  const [isReconBusy, setIsReconBusy] = useState(false);
 
   // Real-time Wails Event Listeners
   useEffect(() => {
@@ -84,6 +109,38 @@ export default function App() {
     setIsAnalyzing(false);
   };
 
+  const runSubdomainDiscovery = async () => {
+    setIsReconBusy(true);
+    try {
+      setSubdomainResult(await EnumerateSubdomains(subdomain, subdomainWordlist.split(/\r?\n/), useDNSBrute));
+    } finally { setIsReconBusy(false); }
+  };
+  const runPathFuzzer = async () => {
+    setIsReconBusy(true);
+    try {
+      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency)));
+    } finally { setIsReconBusy(false); }
+  };
+  const runTLSInspector = async () => {
+    setIsReconBusy(true);
+    try { setTlsResult(await InspectTLS(tlsTarget)); }
+    finally { setIsReconBusy(false); }
+  };
+  const runDNSIntelligence = async () => {
+    setIsReconBusy(true);
+    try { setDnsResult(await DNSIntelligence(dnsDomain, includeRDAP)); }
+    finally { setIsReconBusy(false); }
+  };
+  const refreshHistory = async () => {
+    setHistoryEntries(await GetScanHistory(50));
+    setPortDiff(await DiffLatestPortScans(historyTarget));
+  };
+  const addSubdomainsToHTTP = () => {
+    if (!subdomainResult) return;
+    setBulkUrls(subdomainResult.names.slice(0, 100).map((name) => `https://${name}`).join('\n'));
+    setActiveTab('analyzer');
+  };
+
   const getGradeColor = (grade: string) => {
     if (grade.startsWith('A')) return 'bg-emerald-950 text-emerald-400 border-emerald-700';
     if (grade === 'B') return 'bg-sky-950 text-sky-400 border-sky-700';
@@ -98,35 +155,48 @@ export default function App() {
     return 'border-slate-700 bg-slate-800/50 text-slate-300';
   };
 
+  const formatHistoryResult = (raw: string) => {
+    try { return JSON.stringify(JSON.parse(raw), null, 2); }
+    catch { return raw; }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
       {/* Top Navbar */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${isScanning || isAnalyzing ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} />
+          <div className={`w-3 h-3 rounded-full ${isScanning || isAnalyzing || isReconBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} />
           <div>
             <h1 className="text-lg font-bold tracking-wider text-emerald-400">CODEXA SCANNER</h1>
             <p className="text-xs text-slate-500">Authorized Network & Web Security Assessment</p>
           </div>
         </div>
 
-        <div className="flex gap-2 bg-slate-900 p-1 rounded-lg border border-slate-800">
+        <div className="flex max-w-[64%] flex-wrap justify-end gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
           <button
             onClick={() => setActiveTab('scanner')}
-            className={`px-4 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${
               activeTab === 'scanner' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Port Scanner & Banner Grabber
+            Ports
           </button>
           <button
             onClick={() => setActiveTab('analyzer')}
-            className={`px-4 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${
               activeTab === 'analyzer' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Passive Web Security Checks
+            Web Audit
           </button>
+          {([
+            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['history', 'History'],
+          ] as const).map(([tab, label]) => (
+            <button key={tab} onClick={() => { setActiveTab(tab); if (tab === 'history') void refreshHistory(); }}
+              className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${activeTab === tab ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -377,6 +447,13 @@ export default function App() {
                       )}
                     </div>
 
+                    {(res.technologies?.length || res.edgeServices?.length) ? (
+                      <div className="flex flex-wrap gap-1.5 text-[10px]">
+                        {res.technologies?.map((technology) => <span key={technology} className="rounded border border-sky-900 bg-sky-950/50 px-2 py-1 text-sky-300">{technology}</span>)}
+                        {res.edgeServices?.map((edge) => <span key={edge} className="rounded border border-violet-900 bg-violet-950/50 px-2 py-1 text-violet-300">Edge/WAF clue: {edge}</span>)}
+                      </div>
+                    ) : null}
+
                     {res.tls && (
                       <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
                         TLS {res.tls.version} · {res.tls.cipherSuite} · Certificate {res.tls.verified ? 'verified' : 'not verified'} · Expires {new Date(res.tls.expiresAt).toLocaleDateString()} ({res.tls.daysRemaining} days)
@@ -426,6 +503,94 @@ export default function App() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {activeTab === 'subdomains' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Authorized root domain</label>
+              <input value={subdomain} onChange={(e) => setSubdomain(e.target.value)} placeholder="example.com" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              <input type="checkbox" checked={useDNSBrute} onChange={(e) => setUseDNSBrute(e.target.checked)} />
+              Also perform bounded DNS wordlist lookups (up to 500 labels)
+            </label>
+            {useDNSBrute && <textarea rows={4} value={subdomainWordlist} onChange={(e) => setSubdomainWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />}
+            <button onClick={runSubdomainDiscovery} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Enumerating…' : 'Query Certificate Transparency'}</button>
+            <p className="text-[11px] text-slate-500">Passive results come from crt.sh. DNS wordlist checks are optional active queries; use only within authorized scope.</p>
+          </div>
+          {subdomainResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div className="flex items-center justify-between"><h2 className="text-sm font-bold">{subdomainResult.names.length} names · {subdomainResult.domain}</h2><button onClick={addSubdomainsToHTTP} disabled={!subdomainResult.names.length} className="rounded border border-slate-700 px-3 py-1 text-xs text-emerald-300 disabled:opacity-40">Send first 100 to Web Audit</button></div>
+            {subdomainResult.errors?.map((e, i) => <p key={i} className="text-xs text-amber-300">{e}</p>)}
+            <div className="max-h-72 overflow-auto space-y-1 font-mono text-xs">{subdomainResult.names.map((name) => <div key={name} className="rounded bg-slate-950 px-3 py-1.5 text-slate-200">{name}</div>)}</div>
+          </div>}
+        </div>
+      )}
+      {activeTab === 'fuzzer' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <label className="block text-xs text-slate-400">Authorized base URL</label>
+            <input value={fuzzBaseURL} onChange={(e) => setFuzzBaseURL(e.target.value)} placeholder="https://your-site.example" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+            <div className="flex items-center justify-between"><label className="text-xs text-slate-400">Path wordlist (max 500)</label><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs" /></div>
+            <textarea rows={7} value={fuzzWordlist} onChange={(e) => setFuzzWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />
+            <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking paths…' : 'Run HEAD-only Path Checks'}</button>
+            <p className="text-[11px] text-slate-500">Sends bounded HEAD requests only, follows no redirects, and never reads or displays response bodies. A randomized missing-path check filters likely catch-all responses.</p>
+          </div>
+          {fuzzResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2">
+            {fuzzResult.error && <p className="text-xs text-rose-300">{fuzzResult.error}</p>}
+            <h2 className="text-sm font-bold">{fuzzResult.paths.length} candidate paths · {fuzzResult.baseUrl}</h2>
+            {fuzzResult.paths.map((item) => <div key={item.url} className="flex flex-wrap justify-between gap-2 rounded bg-slate-950 px-3 py-2 font-mono text-xs"><span>{item.url}</span><span className="text-emerald-300">HTTP {item.statusCode} · {item.contentLength >= 0 ? `${item.contentLength} B` : 'size unknown'}</span></div>)}
+          </div>}
+        </div>
+      )}
+      {activeTab === 'tls' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <label className="block text-xs text-slate-400">Authorized hostname or host:port</label>
+            <input value={tlsTarget} onChange={(e) => setTlsTarget(e.target.value)} placeholder="example.com:443" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+            <button onClick={runTLSInspector} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting TLS…' : 'Inspect Certificate & Protocols'}</button>
+            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. Certificate details are independently checked against the system trust store; legacy-protocol support depends on local Go crypto policy.</p>
+          </div>
+          {tlsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <h2 className="text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
+            {tlsResult.validationError && <p className="break-all text-xs text-amber-300">{tlsResult.validationError}</p>}
+            <div className="grid gap-2 text-xs md:grid-cols-2">
+              <div className="rounded bg-slate-950 p-3">Negotiated: {tlsResult.tlsVersion || 'Unavailable'} · {tlsResult.cipherSuite || 'No cipher'}</div>
+              <div className={`rounded p-3 ${tlsResult.trusted ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}`}>{tlsResult.trusted ? 'Certificate trusted' : 'Certificate not verified'}{tlsResult.selfSigned ? ' · Self-signed' : ''}</div>
+              {tlsResult.subject && <div className="rounded bg-slate-950 p-3">Subject: {tlsResult.subject}<br />Issuer: {tlsResult.issuer}</div>}
+              {tlsResult.notAfter && <div className="rounded bg-slate-950 p-3">Expires: {new Date(tlsResult.notAfter).toLocaleString()} · {tlsResult.daysRemaining} day(s) remaining</div>}
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs"><span className={`rounded border px-2 py-1 ${tlsResult.tls10Accepted ? 'border-rose-700 text-rose-300' : 'border-emerald-800 text-emerald-300'}`}>TLS 1.0 {tlsResult.tls10Accepted ? 'accepted' : 'not negotiated'}</span><span className={`rounded border px-2 py-1 ${tlsResult.tls11Accepted ? 'border-rose-700 text-rose-300' : 'border-emerald-800 text-emerald-300'}`}>TLS 1.1 {tlsResult.tls11Accepted ? 'accepted' : 'not negotiated'}</span></div>
+            <div><div className="mb-1 text-xs font-semibold text-slate-400">Certificate SANs</div><div className="flex flex-wrap gap-1">{tlsResult.sans.map((name) => <span key={name} className="rounded bg-slate-950 px-2 py-1 font-mono text-[11px]">{name}</span>)}</div></div>
+          </div>}
+        </div>
+      )}
+      {activeTab === 'dns' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <label className="block text-xs text-slate-400">Authorized domain</label>
+            <input value={dnsDomain} onChange={(e) => setDnsDomain(e.target.value)} placeholder="example.com" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={includeRDAP} onChange={(e) => setIncludeRDAP(e.target.checked)} />Include RDAP network/country registration lookups (external request)</label>
+            <button onClick={runDNSIntelligence} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Resolving records…' : 'Inspect DNS Records'}</button>
+          </div>
+          {dnsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <h2 className="text-sm font-bold">DNS intelligence · {dnsResult.domain}</h2>
+            {dnsResult.errors?.map((e, i) => <p key={i} className="text-xs text-amber-300">{e}</p>)}
+            {([['A', dnsResult.a], ['AAAA', dnsResult.aaaa], ['MX', dnsResult.mx], ['NS', dnsResult.ns], ['TXT', dnsResult.txt], ['SPF', dnsResult.spf], ['DMARC', dnsResult.dmarc]] as [string, string[]][]).map(([label, values]) => <div key={label} className="rounded bg-slate-950 p-3"><div className="mb-1 text-[11px] font-bold text-emerald-300">{label}</div>{values.length ? values.map((v, i) => <div key={i} className="break-all text-xs text-slate-200">{v}</div>) : <div className="text-xs text-slate-600">No record found</div>}</div>)}
+            <div className="rounded bg-slate-950 p-3"><div className="mb-1 text-[11px] font-bold text-emerald-300">Reverse DNS (PTR)</div>{Object.entries(dnsResult.ptr).map(([ip, names]) => <div key={ip} className="text-xs">{ip}: {names.join(', ')}</div>)}</div>
+            {dnsResult.rdap?.map((item) => <div key={item.ip} className="rounded bg-slate-950 p-3 text-xs">RDAP {item.ip} · Registry {item.networkHandle || 'unknown'} · {item.name || 'unknown network'} · {item.country || 'country unknown'}</div>)}
+          </div>}
+        </div>
+      )}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries).</p>
+            <div className="flex flex-wrap gap-2"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-w-64 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><button onClick={() => void refreshHistory()} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold">Refresh History & Compare Ports</button></div>
+          </div>
+          {portDiff && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div>}
+          <div className="max-h-[32rem] space-y-2 overflow-auto">{historyEntries.map((entry) => <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3"><summary className="cursor-pointer text-xs"><span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}<span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></summary><pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre></details>)}</div>
         </div>
       )}
       <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">Develop by H!D3-C4rD</footer>

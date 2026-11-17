@@ -4,9 +4,21 @@ import {main} from '../models';
 
 export function AnalyzeBulkURLs(arg1:string,arg2:number):Promise<Array<main.BulkHeaderResult>>;
 
+export function DNSIntelligence(arg1:string,arg2:boolean):Promise<main.DNSIntelligenceResult>;
+
+export function DiffLatestPortScans(arg1:string):Promise<main.PortScanDiff>;
+
+export function EnumerateSubdomains(arg1:string,arg2:Array<string>,arg3:boolean):Promise<main.SubdomainResult>;
+
 export function ExportJSON(arg1:string,arg2:string):Promise<string>;
 
 export function ExportPortsCSV(arg1:Array<main.PortFinding>):Promise<string>;
+
+export function FuzzPaths(arg1:string,arg2:Array<string>,arg3:number):Promise<main.PathFuzzResult>;
+
+export function GetScanHistory(arg1:number):Promise<Array<main.HistoryEntry>>;
+
+export function InspectTLS(arg1:string):Promise<main.TLSInspection>;
 
 export function StartPortScan(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number):Promise<string>;
 

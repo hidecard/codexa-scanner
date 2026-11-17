@@ -6,12 +6,36 @@ export function AnalyzeBulkURLs(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeBulkURLs'](arg1, arg2);
 }
 
+export function DNSIntelligence(arg1, arg2) {
+  return window['go']['main']['App']['DNSIntelligence'](arg1, arg2);
+}
+
+export function DiffLatestPortScans(arg1) {
+  return window['go']['main']['App']['DiffLatestPortScans'](arg1);
+}
+
+export function EnumerateSubdomains(arg1, arg2, arg3) {
+  return window['go']['main']['App']['EnumerateSubdomains'](arg1, arg2, arg3);
+}
+
 export function ExportJSON(arg1, arg2) {
   return window['go']['main']['App']['ExportJSON'](arg1, arg2);
 }
 
 export function ExportPortsCSV(arg1) {
   return window['go']['main']['App']['ExportPortsCSV'](arg1);
+}
+
+export function FuzzPaths(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FuzzPaths'](arg1, arg2, arg3);
+}
+
+export function GetScanHistory(arg1) {
+  return window['go']['main']['App']['GetScanHistory'](arg1);
+}
+
+export function InspectTLS(arg1) {
+  return window['go']['main']['App']['InspectTLS'](arg1);
 }
 
 export function StartPortScan(arg1, arg2, arg3, arg4, arg5) {

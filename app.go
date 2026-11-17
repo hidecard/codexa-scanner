@@ -5,15 +5,18 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,6 +30,7 @@ import (
 type App struct {
 	ctx        context.Context
 	scanCancel context.CancelFunc
+	historyDB  *sql.DB
 }
 
 func NewApp() *App {
@@ -35,6 +39,30 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
+		return
+	}
+	dir := filepath.Join(configDir, "CodexaScanner")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
+		return
+	}
+	db, err := openScanHistory(filepath.Join(dir, "history.sqlite"))
+	if err != nil {
+		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
+		return
+	}
+	a.historyDB = db
+}
+
+func (a *App) shutdown(context.Context) {
+	if a.historyDB != nil {
+		if err := a.historyDB.Close(); err != nil {
+			log.Printf("Codexa Scanner: closing scan history: %v", err)
+		}
+	}
 }
 
 // ==========================================
@@ -116,6 +144,8 @@ func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutM
 		defer cancel()
 		ports := make(chan int, workers)
 		var wg sync.WaitGroup
+		var findingsMu sync.Mutex
+		var scanFindings []PortFinding
 		timeout := time.Duration(timeoutMs) * time.Millisecond
 
 		// Worker Pool စတင်ခြင်း
@@ -138,13 +168,13 @@ func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutM
 							if svc == "" {
 								svc = "unknown"
 							}
+							finding := PortFinding{Port: p, Service: svc, Banner: banner}
+							findingsMu.Lock()
+							scanFindings = append(scanFindings, finding)
+							findingsMu.Unlock()
 
-							// Open port တွေ့တာနဲ့ Frontend ဆီ Real-time ပို့မယ်
-							runtime.EventsEmit(a.ctx, "port:found", PortFinding{
-								Port:    p,
-								Service: svc,
-								Banner:  banner,
-							})
+							// Notify the frontend as soon as an open port is found.
+							runtime.EventsEmit(a.ctx, "port:found", finding)
 						}
 
 						curr := atomic.AddInt64(&scannedCount, 1)
@@ -169,6 +199,12 @@ func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutM
 		}
 		close(ports)
 		wg.Wait()
+		findingsMu.Lock()
+		snapshot := append([]PortFinding(nil), scanFindings...)
+		findingsMu.Unlock()
+		if err := a.saveHistory("port", target, snapshot); err != nil {
+			log.Printf("Codexa Scanner: saving port scan history: %v", err)
+		}
 
 		runtime.EventsEmit(a.ctx, "scan:done", true)
 	}()
@@ -187,19 +223,21 @@ func (a *App) StopPortScan() {
 // ==========================================
 
 type BulkHeaderResult struct {
-	URL        string            `json:"url"`
-	FinalURL   string            `json:"finalUrl"`
-	StatusCode int               `json:"statusCode"`
-	Title      string            `json:"title"`
-	Server     string            `json:"server"`
-	PoweredBy  string            `json:"poweredBy"`
-	Grade      string            `json:"grade"`
-	RiskScore  int               `json:"riskScore"`
-	Missing    []string          `json:"missing"`
-	Present    map[string]string `json:"present"`
-	TLS        *TLSDetails       `json:"tls,omitempty"`
-	Findings   []SecurityFinding `json:"findings"`
-	Error      string            `json:"error"`
+	URL          string            `json:"url"`
+	FinalURL     string            `json:"finalUrl"`
+	StatusCode   int               `json:"statusCode"`
+	Title        string            `json:"title"`
+	Server       string            `json:"server"`
+	PoweredBy    string            `json:"poweredBy"`
+	Technologies []string          `json:"technologies"`
+	EdgeServices []string          `json:"edgeServices"`
+	Grade        string            `json:"grade"`
+	RiskScore    int               `json:"riskScore"`
+	Missing      []string          `json:"missing"`
+	Present      map[string]string `json:"present"`
+	TLS          *TLSDetails       `json:"tls,omitempty"`
+	Findings     []SecurityFinding `json:"findings"`
+	Error        string            `json:"error"`
 }
 
 type TLSDetails struct {
@@ -282,6 +320,9 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 	}
 
 	wg.Wait()
+	if err := a.saveHistory("http", fmt.Sprintf("bulk HTTP (%d targets)", len(urls)), results); err != nil {
+		log.Printf("Codexa Scanner: saving HTTP scan history: %v", err)
+	}
 	return results
 }
 
@@ -331,6 +372,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	}
 	result.Server = resp.Header.Get("Server")
 	result.PoweredBy = resp.Header.Get("X-Powered-By")
+	result.Technologies, result.EdgeServices = fingerprintResponse(resp, bodyBytes)
 	for _, h := range secHeaders {
 		if value := resp.Header.Get(h); value == "" {
 			result.Missing = append(result.Missing, h)
