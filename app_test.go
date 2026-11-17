@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -155,6 +156,115 @@ func TestNormalizePortScanLimits(t *testing.T) {
 	workers, timeout = normalizePortScanLimits(1000, 0, 0)
 	if workers != defaultScanWorkers || timeout != time.Duration(defaultScanTimeout)*time.Millisecond {
 		t.Errorf("non-positive values should use defaults, got %d workers and %s", workers, timeout)
+	}
+}
+
+type stubScanResolver struct {
+	addresses []net.IPAddr
+	err       error
+	calls     int
+	host      string
+}
+
+func (r *stubScanResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	r.calls++
+	r.host = host
+	return r.addresses, r.err
+}
+
+type blockingScanResolver struct {
+	started chan struct{}
+}
+
+func (r *blockingScanResolver) LookupIPAddr(ctx context.Context, _ string) ([]net.IPAddr, error) {
+	close(r.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestResolveScanTargetSelectsDeterministicAddressFromMultipleAnswers(t *testing.T) {
+	resolver := &stubScanResolver{addresses: []net.IPAddr{
+		{IP: net.ParseIP("2001:db8::10")},
+		{IP: net.ParseIP("192.0.2.10")},
+		{IP: net.ParseIP("192.0.2.2")},
+	}}
+
+	got, err := resolveScanTarget(context.Background(), "scanner.example", resolver)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	if got != "192.0.2.2" {
+		t.Fatalf("expected IPv4-first numeric ordering to choose 192.0.2.2, got %q", got)
+	}
+	if resolver.calls != 1 || resolver.host != "scanner.example" {
+		t.Fatalf("expected one lookup for hostname, calls=%d host=%q", resolver.calls, resolver.host)
+	}
+}
+
+func TestResolveScanTargetSupportsIPv4AndIPv6LiteralsWithoutLookup(t *testing.T) {
+	for _, target := range []string{"192.0.2.7", "2001:db8::7"} {
+		resolver := &stubScanResolver{}
+		got, err := resolveScanTarget(context.Background(), target, resolver)
+		if err != nil {
+			t.Errorf("resolve literal %q: %v", target, err)
+			continue
+		}
+		if got != target {
+			t.Errorf("expected literal %q to stay unchanged, got %q", target, got)
+		}
+		if resolver.calls != 0 {
+			t.Errorf("literal %q should not trigger DNS lookup", target)
+		}
+	}
+}
+
+func TestResolveScanTargetHonorsCancelledLookupContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resolver := &stubScanResolver{}
+
+	_, err := resolveScanTarget(ctx, "scanner.example", resolver)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if resolver.calls != 0 {
+		t.Fatal("cancelled lookup should not invoke the resolver")
+	}
+}
+
+func TestResolveScanTargetCanBeCancelledDuringLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	resolver := &blockingScanResolver{started: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() {
+		_, err := resolveScanTarget(ctx, "scanner.example", resolver)
+		result <- err
+	}()
+
+	select {
+	case <-resolver.started:
+	case <-time.After(time.Second):
+		t.Fatal("resolver was not called")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected cancellation during lookup, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("lookup did not stop after context cancellation")
+	}
+}
+
+func TestResolveScanTargetReturnsLookupErrors(t *testing.T) {
+	wantErr := errors.New("DNS unavailable")
+	resolver := &stubScanResolver{err: wantErr}
+
+	_, err := resolveScanTarget(context.Background(), "scanner.example", resolver)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected wrapped resolver error %v, got %v", wantErr, err)
 	}
 }
 

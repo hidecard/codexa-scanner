@@ -28,6 +28,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [findings, setFindings] = useState<main.PortFinding[]>([]);
   const [scanError, setScanError] = useState('');
+  const [resolvedScanTarget, setResolvedScanTarget] = useState('');
 
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
@@ -72,19 +73,24 @@ export default function App() {
         setProgress((current) => Math.min(current, 99));
         setScanError('Scan cancelled.');
       } else if (status === 'failed') {
-        setScanError('Scan failed unexpectedly. Check the application log for details.');
+        setScanError((current) => current || 'Scan failed unexpectedly. Check the application log for details.');
       }
     });
+    EventsOn('scan:target', (address: string) => setResolvedScanTarget(address));
+    EventsOn('scan:error', (message: string) => setScanError(message));
 
     return () => {
       EventsOff('port:found');
       EventsOff('scan:progress');
       EventsOff('scan:done');
+      EventsOff('scan:target');
+      EventsOff('scan:error');
     };
   }, []);
 
   const handleStartScan = async () => {
     setScanError('');
+    setResolvedScanTarget('');
     setFindings([]);
     setProgress(0);
     setIsScanning(true);
@@ -322,6 +328,11 @@ export default function App() {
             </div>
           )}
 
+          {resolvedScanTarget && (
+            <p className="text-xs text-slate-500">
+              Pinned scan address: <span className="font-mono text-emerald-300">{resolvedScanTarget}</span>
+            </p>
+          )}
           {scanError && <p className="text-rose-400 text-xs">{scanError}</p>}
 
           {/* Real-time Results Table */}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +57,7 @@ const (
 	maxScanWorkers     = 512
 	defaultScanTimeout = 800
 	maxScanTimeout     = 30_000
+	scanResolveTimeout = 5 * time.Second
 )
 
 func NewApp() *App {
@@ -201,6 +204,51 @@ func (a *App) emitScanEvent(event string, data any) {
 	}
 }
 
+type scanTargetResolver interface {
+	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
+}
+
+func resolveScanTarget(ctx context.Context, target string, resolver scanTargetResolver) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if ip := net.ParseIP(target); ip != nil {
+		return ip.String(), nil
+	}
+	addresses, err := resolver.LookupIPAddr(ctx, target)
+	if err != nil {
+		return "", fmt.Errorf("resolve target: %w", err)
+	}
+	return selectScanAddress(addresses)
+}
+
+func selectScanAddress(addresses []net.IPAddr) (string, error) {
+	valid := make([]net.IPAddr, 0, len(addresses))
+	for _, address := range addresses {
+		if address.IP.To16() != nil {
+			valid = append(valid, address)
+		}
+	}
+	if len(valid) == 0 {
+		return "", fmt.Errorf("hostname has no usable IP addresses")
+	}
+	sort.Slice(valid, func(i, j int) bool {
+		left4, right4 := valid[i].IP.To4(), valid[j].IP.To4()
+		if (left4 != nil) != (right4 != nil) {
+			return left4 != nil
+		}
+		left, right := valid[i].IP.To16(), valid[j].IP.To16()
+		if left4 != nil {
+			left, right = left4, right4
+		}
+		if order := bytes.Compare(left, right); order != 0 {
+			return order < 0
+		}
+		return valid[i].Zone < valid[j].Zone
+	})
+	return valid[0].String(), nil
+}
+
 func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, workers int, timeout time.Duration) {
 	totalPorts := endPort - startPort + 1
 	var scannedCount int64
@@ -239,6 +287,20 @@ func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, wor
 		close(scan.done)
 	}()
 
+	resolveCtx, cancelResolve := context.WithTimeout(scan.ctx, scanResolveTimeout)
+	resolvedTarget, err := resolveScanTarget(resolveCtx, target, net.DefaultResolver)
+	cancelResolve()
+	if err != nil {
+		if scan.ctx.Err() != nil {
+			status = scanStatusCancelled
+		} else {
+			status = scanStatusFailed
+			a.emitScanEvent("scan:error", fmt.Sprintf("Could not resolve %q: %v", target, err))
+		}
+		return
+	}
+	a.emitScanEvent("scan:target", resolvedTarget)
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -247,7 +309,7 @@ func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, wor
 				if scan.ctx.Err() != nil {
 					return
 				}
-				address := net.JoinHostPort(target, strconv.Itoa(port))
+				address := net.JoinHostPort(resolvedTarget, strconv.Itoa(port))
 				conn, err := dialer.DialContext(scan.ctx, "tcp", address)
 				if err == nil {
 					banner := grabBanner(scan.ctx, conn, target, port)
