@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -145,13 +147,71 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 	return clean
 }
 
-func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutMs int) string {
+func normalizePortScanTarget(raw string) (string, error) {
+	for _, char := range raw {
+		if unicode.IsControl(char) {
+			return "", fmt.Errorf("target must not contain control characters")
+		}
+	}
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return "", fmt.Errorf("target is required")
+	}
+	for _, char := range target {
+		if char > unicode.MaxASCII {
+			return "", fmt.Errorf("use an ASCII hostname (IDN names must be written in punycode)")
+		}
+	}
+	if address, err := netip.ParseAddr(target); err == nil {
+		return address.String(), nil
+	}
+	if strings.ContainsAny(target, ":[]/?#@\\") || strings.ContainsAny(target, " \t") {
+		return "", fmt.Errorf("enter a bare IP address or hostname without a URL, brackets, or port")
+	}
+
+	target = strings.ToLower(target)
+	hostname := strings.TrimSuffix(target, ".")
+	if hostname == "" || len(hostname) > 253 {
+		return "", fmt.Errorf("hostname must contain between 1 and 253 characters")
+	}
+	labels := strings.Split(hostname, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return "", fmt.Errorf("hostname labels must contain between 1 and 63 characters")
+		}
+		for i, char := range label {
+			valid := char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-'
+			if !valid || char == '-' && (i == 0 || i == len(label)-1) {
+				return "", fmt.Errorf("hostname labels may use letters, digits, and internal hyphens only")
+			}
+		}
+	}
+	allNumeric := true
+	for _, label := range labels {
+		for _, char := range label {
+			if char < '0' || char > '9' {
+				allNumeric = false
+				break
+			}
+		}
+	}
+	if allNumeric {
+		return "", fmt.Errorf("numeric-only target is not a valid IPv4 address or hostname")
+	}
+	return target, nil
+}
+
+func (a *App) StartPortScan(target string, startPort, endPort, workers, timeoutMs int, scopeConfirmed bool) string {
 	if a == nil {
 		return "Scanner unavailable"
 	}
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "Target is required"
+	var err error
+	target, err = normalizePortScanTarget(target)
+	if err != nil {
+		return err.Error()
+	}
+	if !scopeConfirmed {
+		return "Confirm authorization for this target and port range before scanning"
 	}
 	if startPort < 1 || endPort > 65535 || startPort > endPort {
 		return "Invalid port range (1-65535)"
@@ -212,7 +272,7 @@ func resolveScanTarget(ctx context.Context, target string, resolver scanTargetRe
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if ip := net.ParseIP(target); ip != nil {
+	if ip, err := netip.ParseAddr(target); err == nil {
 		return ip.String(), nil
 	}
 	addresses, err := resolver.LookupIPAddr(ctx, target)

@@ -22,6 +22,7 @@ export default function App() {
   const [target, setTarget] = useState('scanme.nmap.org');
   const [startPort, setStartPort] = useState(1);
   const [endPort, setEndPort] = useState(1024);
+  const [scopeConfirmed, setScopeConfirmed] = useState(false);
   const [workers, setWorkers] = useState(200);
   const [timeoutMs, setTimeoutMs] = useState(800);
   const [isScanning, setIsScanning] = useState(false);
@@ -89,6 +90,8 @@ export default function App() {
   }, []);
 
   const handleStartScan = async () => {
+    const confirmedScope = scopeConfirmed;
+    setScopeConfirmed(false);
     setScanError('');
     setResolvedScanTarget('');
     setFindings([]);
@@ -96,11 +99,12 @@ export default function App() {
     setIsScanning(true);
 
     const status = await StartPortScan(
-      target.trim(),
+      target,
       Number(startPort),
       Number(endPort),
       Number(workers),
-      Number(timeoutMs)
+      Number(timeoutMs),
+      confirmedScope
     );
 
     if (status !== 'STARTED') {
@@ -227,7 +231,7 @@ export default function App() {
               <label className="block text-xs text-slate-400 mb-1">Target IP / Hostname</label>
               <input
                 value={target}
-                onChange={(e) => setTarget(e.target.value)}
+                onChange={(e) => { setTarget(e.target.value); setScopeConfirmed(false); }}
                 disabled={isScanning}
                 className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
@@ -238,7 +242,7 @@ export default function App() {
               <input
                 type="number"
                 value={startPort}
-                onChange={(e) => setStartPort(Number(e.target.value))}
+                onChange={(e) => { setStartPort(Number(e.target.value)); setScopeConfirmed(false); }}
                 disabled={isScanning}
                 className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
@@ -249,7 +253,7 @@ export default function App() {
               <input
                 type="number"
                 value={endPort}
-                onChange={(e) => setEndPort(Number(e.target.value))}
+                onChange={(e) => { setEndPort(Number(e.target.value)); setScopeConfirmed(false); }}
                 disabled={isScanning}
                 className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
@@ -282,12 +286,27 @@ export default function App() {
             </div>
           </div>
 
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-xs leading-relaxed text-slate-300">
+            <input
+              type="checkbox"
+              checked={scopeConfirmed}
+              onChange={(e) => setScopeConfirmed(e.target.checked)}
+              disabled={isScanning}
+              className="mt-0.5 accent-emerald-500"
+            />
+            <span>
+              <span className="font-semibold text-amber-200">Scope confirmation required.</span>{' '}
+              I own or have permission to scan this exact target and port range. Authorized private and lab targets are allowed.
+            </span>
+          </label>
+
           {/* Action Buttons & Progress */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             {!isScanning ? (
               <button
                 onClick={handleStartScan}
-                className="min-h-11 flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+                disabled={!scopeConfirmed}
+                className="min-h-11 flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-600"
               >
                 Start Live Scan
               </button>

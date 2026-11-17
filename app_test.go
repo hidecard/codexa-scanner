@@ -268,6 +268,61 @@ func TestResolveScanTargetReturnsLookupErrors(t *testing.T) {
 	}
 }
 
+func TestNormalizePortScanTargetAcceptsIPsAndDNSHostnames(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "192.0.2.8", want: "192.0.2.8"},
+		{input: "10.0.0.2", want: "10.0.0.2"},
+		{input: "2001:db8::8", want: "2001:db8::8"},
+		{input: "fe80::1%eth0", want: "fe80::1%eth0"},
+		{input: " Example.COM. ", want: "example.com."},
+		{input: "localhost", want: "localhost"},
+	}
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			got, err := normalizePortScanTarget(test.input)
+			if err != nil {
+				t.Fatalf("normalize target: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("expected %q, got %q", test.want, got)
+			}
+		})
+	}
+}
+
+func TestNormalizePortScanTargetRejectsUnsafeOrMalformedInput(t *testing.T) {
+	longLabel := strings.Repeat("a", 64) + ".example"
+	tests := []string{
+		"", "   ", "https://example.com", "example.com:443", "example.com/path",
+		"[2001:db8::1]:443", "bad..example", "-bad.example", "bad-.example",
+		"192.0.2.999", "127.1", "2130706433", longLabel, "has space.example", "example\n.com", "éxample.com",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			if normalized, err := normalizePortScanTarget(target); err == nil {
+				t.Fatalf("expected target %q to be rejected, normalized to %q", target, normalized)
+			}
+		})
+	}
+}
+
+func TestStartPortScanRequiresExplicitScopeConfirmation(t *testing.T) {
+	app := &App{}
+	status := app.StartPortScan("192.168.1.10", 80, 80, 1, 100, false)
+	if status != "Confirm authorization for this target and port range before scanning" {
+		t.Fatalf("expected scope confirmation requirement, got %q", status)
+	}
+	app.scanMu.Lock()
+	active := app.activeScan
+	app.scanMu.Unlock()
+	if active != nil {
+		t.Fatal("scan should not start without explicit scope confirmation")
+	}
+}
+
 func TestStopPortScanCancelsBannerReadAndIsConcurrencySafe(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -285,7 +340,7 @@ func TestStopPortScanCancelsBannerReadAndIsConcurrencySafe(t *testing.T) {
 
 	address := listener.Addr().(*net.TCPAddr)
 	app := &App{}
-	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 30_000); status != "STARTED" {
+	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 30_000, true); status != "STARTED" {
 		t.Fatalf("start scan: %s", status)
 	}
 
@@ -307,7 +362,7 @@ func TestStopPortScanCancelsBannerReadAndIsConcurrencySafe(t *testing.T) {
 	if scan.status != scanStatusRunning {
 		t.Fatalf("active scan should report running, got %q", scan.status)
 	}
-	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 100); status != "A scan is already running or stopping" {
+	if status := app.StartPortScan("127.0.0.1", address.Port, address.Port, 1, 100, true); status != "A scan is already running or stopping" {
 		t.Fatalf("second scan should be rejected while one is active, got %q", status)
 	}
 

@@ -20,6 +20,6 @@ export function GetScanHistory(arg1:number):Promise<Array<main.HistoryEntry>>;
 
 export function InspectTLS(arg1:string):Promise<main.TLSInspection>;
 
-export function StartPortScan(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number):Promise<string>;
+export function StartPortScan(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:boolean):Promise<string>;
 
 export function StopPortScan():Promise<void>;
