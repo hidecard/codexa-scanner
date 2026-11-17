@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -461,7 +460,7 @@ type SecurityFinding struct {
 var titleRegex = regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
 var mixedContentRegex = regexp.MustCompile(`(?i)(?:src|poster)\s*=\s*["']http://`)
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResult {
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool) []BulkHeaderResult {
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -485,16 +484,6 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 		concurrency = 20
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("stopped after 5 redirects")
-			}
-			return nil
-		},
-	}
-
 	secHeaders := []string{
 		"Strict-Transport-Security",
 		"Content-Security-Policy",
@@ -514,7 +503,14 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 		go func(i int, target string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			client, err := newScopedHTTPClient(target, allowPrivateTargets, net.DefaultResolver)
+			if err != nil {
+				inputURL := analysisURLForDisplay(target)
+				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Error: err.Error()}
+				return
+			}
 			results[i] = analyzeURL(target, client, secHeaders)
+			client.CloseIdleConnections()
 		}(idx, rawURL)
 	}
 
@@ -526,17 +522,9 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 }
 
 func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHeaderResult {
-	inputURL := strings.TrimSpace(target)
-	if !strings.Contains(inputURL, "://") {
-		inputURL = "https://" + inputURL
-	}
-	parsed, err := url.Parse(inputURL)
-	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
-		return BulkHeaderResult{URL: inputURL, Error: "Enter a valid http:// or https:// URL without embedded credentials."}
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return BulkHeaderResult{URL: inputURL, Error: "Enter a valid http:// or https:// URL without embedded credentials."}
+	inputURL, parsed, _, err := parseHTTPAnalysisURL(target)
+	if err != nil {
+		return BulkHeaderResult{URL: inputURL, Error: err.Error()}
 	}
 	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Present: make(map[string]string), Findings: []SecurityFinding{}}
 	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
@@ -547,7 +535,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Error = "Connection failed, timed out, or TLS certificate verification failed. No insecure TLS bypass was used."
+		result.Error = httpAnalysisErrorMessage(err)
 		var certErr x509.UnknownAuthorityError
 		var hostnameErr x509.HostnameError
 		var invalidErr x509.CertificateInvalidError

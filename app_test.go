@@ -6,9 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -137,6 +139,269 @@ func TestAnalyzeURLReportsPlainHTTP(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected high-severity cleartext-transport finding, got %+v", result.Findings)
+}
+
+type stubHTTPIPLookup struct {
+	mu        sync.Mutex
+	answerSet [][]netip.Addr
+	err       error
+	calls     int
+	hosts     []string
+}
+
+func (r *stubHTTPIPLookup) LookupNetIP(ctx context.Context, _, host string) ([]netip.Addr, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.hosts = append(r.hosts, host)
+	if r.err != nil {
+		return nil, r.err
+	}
+	if len(r.answerSet) == 0 {
+		return nil, nil
+	}
+	index := r.calls - 1
+	if index >= len(r.answerSet) {
+		index = len(r.answerSet) - 1
+	}
+	return append([]netip.Addr(nil), r.answerSet[index]...), nil
+}
+
+func (r *stubHTTPIPLookup) lookupCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func TestValidateHTTPAddressPolicy(t *testing.T) {
+	tests := []struct {
+		address          string
+		allowedByDefault bool
+		allowedWithOptIn bool
+	}{
+		{"8.8.8.8", true, true},
+		{"2001:4860:4860::8888", true, true},
+		{"10.0.0.1", false, true},
+		{"172.16.1.1", false, true},
+		{"192.168.1.1", false, true},
+		{"fd00::1", false, true},
+		{"127.0.0.1", false, true},
+		{"::1", false, true},
+		{"::ffff:127.0.0.1", false, true},
+		{"169.254.169.254", false, false},
+		{"fe80::1", false, false},
+		{"fe80::1%eth0", false, false},
+		{"100.64.0.1", false, false},
+		{"0.0.0.0", false, false},
+		{"::", false, false},
+		{"224.0.0.1", false, false},
+		{"ff02::1", false, false},
+		{"192.0.2.1", false, false},
+		{"198.18.0.1", false, false},
+		{"240.0.0.1", false, false},
+		{"2001:db8::1", false, false},
+		{"2002::1", false, false},
+		{"3fff::1", false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.address, func(t *testing.T) {
+			ip := netip.MustParseAddr(test.address)
+			_, defaultErr := validateHTTPAddress(ip, false)
+			if (defaultErr == nil) != test.allowedByDefault {
+				t.Errorf("default allow=%v, error=%v", test.allowedByDefault, defaultErr)
+			}
+			_, optInErr := validateHTTPAddress(ip, true)
+			if (optInErr == nil) != test.allowedWithOptIn {
+				t.Errorf("opt-in allow=%v, error=%v", test.allowedWithOptIn, optInErr)
+			}
+		})
+	}
+}
+
+func TestPinnedHTTPResolverRejectsMixedPublicAndPrivateDNSAnswers(t *testing.T) {
+	lookup := &stubHTTPIPLookup{answerSet: [][]netip.Addr{{
+		netip.MustParseAddr("8.8.8.8"),
+		netip.MustParseAddr("10.0.0.4"),
+	}}}
+	resolver := newPinnedHTTPResolver(lookup, false)
+
+	_, err := resolver.resolve(context.Background(), "mixed.example")
+	if !errors.Is(err, errHTTPPrivateAddress) {
+		t.Fatalf("expected mixed answer set to be rejected as private, got %v", err)
+	}
+	if lookup.lookupCount() != 1 {
+		t.Fatalf("expected one DNS lookup, got %d", lookup.lookupCount())
+	}
+}
+
+func TestValidateHTTPRedirectScopeAndHopLimit(t *testing.T) {
+	_, source, host, err := parseHTTPAnalysisURL("http://example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := newHTTPTargetScope(source, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	via := []*http.Request{{URL: source}}
+
+	allowed, _ := url.Parse("https://example.com")
+	if err := validateHTTPRedirect(&http.Request{URL: allowed}, via, scope); err != nil {
+		t.Fatalf("same-host HTTP to HTTPS upgrade should be allowed: %v", err)
+	}
+	for _, blocked := range []string{
+		"https://other.example/", "https://example.com:8443/", "ftp://example.com/",
+		"https://user:pass@example.com/",
+	} {
+		parsed, parseErr := url.Parse(blocked)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		if err := validateHTTPRedirect(&http.Request{URL: parsed}, via, scope); !errors.Is(err, errHTTPRedirectOutOfScope) {
+			t.Errorf("expected %q to be outside scope, got %v", blocked, err)
+		}
+	}
+
+	_, secureSource, secureHost, err := parseHTTPAnalysisURL("https://example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secureScope, err := newHTTPTargetScope(secureSource, secureHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downgrade, _ := url.Parse("http://example.com")
+	if err := validateHTTPRedirect(&http.Request{URL: downgrade}, []*http.Request{{URL: secureSource}}, secureScope); !errors.Is(err, errHTTPRedirectDowngrade) {
+		t.Fatalf("expected HTTPS downgrade to be blocked, got %v", err)
+	}
+
+	hops := make([]*http.Request, maxHTTPRedirects)
+	for i := range hops {
+		hops[i] = &http.Request{URL: source}
+	}
+	if err := validateHTTPRedirect(&http.Request{URL: allowed}, hops, scope); err != nil {
+		t.Fatalf("fifth redirect should be allowed: %v", err)
+	}
+	hops = append(hops, &http.Request{URL: source})
+	if err := validateHTTPRedirect(&http.Request{URL: allowed}, hops, scope); !errors.Is(err, errHTTPTooManyRedirects) {
+		t.Fatalf("sixth redirect should be blocked, got %v", err)
+	}
+}
+
+func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false)
+	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
+		t.Fatalf("expected private target policy error, got %+v", results)
+	}
+	if got := atomic.LoadInt32(&requests); got != 0 {
+		t.Fatalf("request reached private target without opt-in (%d requests)", got)
+	}
+
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true)
+	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
+		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("expected one loopback request after opt-in, got %d", got)
+	}
+}
+
+func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testing.T) {
+	var destinationRequests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/destination" {
+			atomic.AddInt32(&destinationRequests, 1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_, port, _ := net.SplitHostPort(r.Host)
+		http.Redirect(w, r, "http://localhost:"+port+"/destination", http.StatusFound)
+	}))
+	defer server.Close()
+
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true)
+	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
+		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
+	}
+	if got := atomic.LoadInt32(&destinationRequests); got != 0 {
+		t.Fatalf("out-of-scope redirect reached destination handler (%d requests)", got)
+	}
+}
+
+func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&requests, 1) == 1 {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverURL.Host = net.JoinHostPort("scanner.example.test", serverURL.Port())
+	lookup := &stubHTTPIPLookup{answerSet: [][]netip.Addr{
+		{netip.MustParseAddr("127.0.0.1")},
+		{netip.MustParseAddr("203.0.113.11")},
+	}}
+	client, err := newScopedHTTPClient(serverURL.String(), true, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	transport := client.Transport.(*http.Transport)
+	if transport.Proxy != nil {
+		t.Fatal("scoped transport must not use ambient proxies")
+	}
+
+	result := analyzeURL(serverURL.String(), client, nil)
+	if result.Error != "" || result.StatusCode != http.StatusOK {
+		t.Fatalf("expected redirect to use pinned loopback address, got %+v", result)
+	}
+	if got := lookup.lookupCount(); got != 1 {
+		t.Fatalf("expected hostname to resolve once across redirect chain, got %d lookups", got)
+	}
+	if got := atomic.LoadInt32(&requests); got != 2 {
+		t.Fatalf("expected initial and redirected request, got %d", got)
+	}
+}
+
+func TestAnalyzeURLStopsAfterFiveRedirects(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		http.Redirect(w, r, "/redirect", http.StatusFound)
+	}))
+	defer server.Close()
+	client, err := newScopedHTTPClient(server.URL+"/start", true, net.DefaultResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+
+	result := analyzeURL(server.URL+"/start", client, nil)
+	if !strings.Contains(result.Error, "after five hops") {
+		t.Fatalf("expected five-hop redirect limit error, got %+v", result)
+	}
+	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+1 {
+		t.Fatalf("expected initial request plus five redirects, got %d requests", got)
+	}
 }
 
 func TestNormalizePortScanLimits(t *testing.T) {

@@ -34,6 +34,7 @@ export default function App() {
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
   const [httpThreads, setHttpThreads] = useState(10);
+  const [allowPrivateHTTPTargets, setAllowPrivateHTTPTargets] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [httpResults, setHttpResults] = useState<main.BulkHeaderResult[]>([]);
 
@@ -118,9 +119,11 @@ export default function App() {
   };
 
   const handleBulkAnalyze = async () => {
+    const allowPrivateForBatch = allowPrivateHTTPTargets;
+    setAllowPrivateHTTPTargets(false);
     setIsAnalyzing(true);
     setHttpResults([]);
-    const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads));
+    const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch);
     setHttpResults(res || []);
     setIsAnalyzing(false);
   };
@@ -423,10 +426,27 @@ export default function App() {
             <textarea
               rows={4}
               value={bulkUrls}
-              onChange={(e) => setBulkUrls(e.target.value)}
+              onChange={(e) => { setBulkUrls(e.target.value); setAllowPrivateHTTPTargets(false); }}
               placeholder="https://your-authorized-site.example&#10;http://your-lab-host.example"
               className="min-h-28 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
             />
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-xs leading-relaxed text-slate-300">
+              <input
+                type="checkbox"
+                checked={allowPrivateHTTPTargets}
+                onChange={(e) => setAllowPrivateHTTPTargets(e.target.checked)}
+                disabled={isAnalyzing}
+                className="mt-0.5 accent-emerald-500"
+              />
+              <span>
+                <span className="font-semibold text-amber-200">Private/lab access (optional).</span>{' '}
+                Allow authorized RFC1918, IPv6 ULA, and loopback targets for this analysis. Link-local and reserved/special-use addresses stay blocked.
+              </span>
+            </label>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              Redirects stay on each URL’s hostname and allowed ports; cross-host redirects and HTTPS-to-HTTP downgrades are blocked. HTTP-to-HTTPS on standard ports is allowed.
+            </p>
 
             <div className="flex gap-3">
               <button
