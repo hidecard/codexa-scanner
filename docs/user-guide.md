@@ -17,7 +17,7 @@ For development, run `wails dev` from the repository root. For a Linux desktop b
 
 ## 3. Choose the right feature
 
-Use **Ports** when you need bounded TCP reachability checks for one approved host. Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, and redirect chains. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review local records, compare the latest two port snapshots, and export reports.
+Use **Ports** when you need bounded TCP reachability checks for one approved host. Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, and bounded security.txt/robots.txt inspectors. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review local records, compare the latest two port snapshots, and export reports.
 
 Each feature guide explains its accepted input format, step-by-step workflow, output interpretation, limits, and troubleshooting:
 
@@ -42,7 +42,7 @@ Private RFC1918, IPv6 ULA, and loopback HTTP targets are blocked by default and 
 
 ## 6. Local history and privacy
 
-History is stored in the operating system user configuration directory under `CodexaScanner/history.sqlite`, capped at 2,000 entries. The database is not uploaded and is not encrypted. URL query strings, headers, cookies, banners, private hostnames, PTR names, RDAP fields, and scan results can contain sensitive information. Review and redact data before sharing. Close the app before manually deleting the database to clear local history.
+History is stored in the operating system user configuration directory under `CodexaScanner/history.sqlite`, capped at 2,000 entries. The database is not uploaded and is not encrypted. Before persistence and before JSON export, the app applies bounded redaction for embedded URL credentials, sensitive URL query/fragments, and sensitive result keys (password/secret/token/authorization/cookie/credential fields). This reduces accidental retention but is not a complete guarantee; URL paths, hostnames, banners, PTR names, RDAP fields, and other scan results can still contain sensitive information. Review and redact data before sharing. Close the app before manually deleting the database to clear local history.
 
 ## 7. Troubleshooting
 

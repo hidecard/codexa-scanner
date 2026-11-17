@@ -178,7 +178,7 @@ func TestFuzzPathsFiltersCustomNotFoundAndUsesHEADOnly(t *testing.T) {
 		_, _ = w.Write([]byte("custom not-found body"))
 	}))
 	defer server.Close()
-	result := (&App{}).FuzzPaths(server.URL, []string{"found", "missing", "../private", "//attacker.test/x", "found"}, 4)
+	result := (&App{}).FuzzPaths(server.URL, []string{"found", "missing", "../private", "//attacker.test/x", "found"}, 4, 0)
 	if result.Error != "" {
 		t.Fatalf("unexpected error: %s", result.Error)
 	}

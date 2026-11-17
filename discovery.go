@@ -235,7 +235,7 @@ func (a *App) EnumerateSubdomains(domain string, wordlist []string, brute bool) 
 }
 
 // FuzzPaths sends bounded HEAD requests only; it never reads response bodies. Redirects are disabled.
-func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int) PathFuzzResult {
+func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int) PathFuzzResult {
 	u, err := validateDiscoveryURL(baseURL)
 	r := PathFuzzResult{BaseURL: baseURL, Paths: []PathFinding{}}
 	if err != nil {
@@ -247,6 +247,12 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int) PathFuz
 	}
 	if concurrency > discoveryWorkers {
 		concurrency = discoveryWorkers
+	}
+	if requestDelayMs < 0 {
+		requestDelayMs = 0
+	}
+	if requestDelayMs > 5000 {
+		requestDelayMs = 5000
 	}
 	clean := make([]string, 0, min(len(paths), discoveryLimit))
 	seen := map[string]bool{}
@@ -282,6 +288,9 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int) PathFuz
 		go func(i int, p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if requestDelayMs > 0 {
+				time.Sleep(time.Duration(requestDelayMs) * time.Millisecond)
+			}
 			target := joinFuzzURL(u, p)
 			req, e := http.NewRequest(http.MethodHead, target, nil)
 			if e != nil {

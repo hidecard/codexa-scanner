@@ -5,19 +5,25 @@ import {
   AnalyzeBulkURLs,
   ExportJSON,
   ExportPortsCSV,
+  ExportText,
   EnumerateSubdomains,
   FuzzPaths,
   InspectTLS,
   IPInformation,
   DNSIntelligence,
-  GetScanHistory,
+  SearchScanHistory,
   DiffLatestPortScans,
+  DiffLatestWebAuditScans,
+  DeleteScanHistoryEntry,
+  ClearScanHistory,
 } from '../wailsjs/go/main/App';
-import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
+import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
+type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history';
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history'>('scanner');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
   // --- Port Scanner States ---
   const [target, setTarget] = useState('scanme.nmap.org');
@@ -36,6 +42,7 @@ export default function App() {
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
   const [httpThreads, setHttpThreads] = useState(10);
+  const [httpDelayMs, setHttpDelayMs] = useState(0);
   const [allowPrivateHTTPTargets, setAllowPrivateHTTPTargets] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [httpResults, setHttpResults] = useState<main.BulkHeaderResult[]>([]);
@@ -48,6 +55,7 @@ export default function App() {
   const [fuzzBaseURL, setFuzzBaseURL] = useState('https://example.com');
   const [fuzzWordlist, setFuzzWordlist] = useState('/admin\n/dashboard\n/robots.txt\n/.well-known/security.txt');
   const [fuzzConcurrency, setFuzzConcurrency] = useState(5);
+  const [fuzzDelayMs, setFuzzDelayMs] = useState(0);
   const [fuzzResult, setFuzzResult] = useState<main.PathFuzzResult | null>(null);
   const [tlsTarget, setTlsTarget] = useState('example.com:443');
   const [tlsResult, setTlsResult] = useState<main.TLSInspection | null>(null);
@@ -58,7 +66,10 @@ export default function App() {
   const [ipResult, setIpResult] = useState<main.IPInformationResult | null>(null);
   const [historyTarget, setHistoryTarget] = useState('scanme.nmap.org');
   const [historyEntries, setHistoryEntries] = useState<main.HistoryEntry[]>([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'port' | 'http' | 'subdomain' | 'fuzzer' | 'tls' | 'dns' | 'ip'>('all');
   const [portDiff, setPortDiff] = useState<main.PortScanDiff | null>(null);
+  const [webAuditDiff, setWebAuditDiff] = useState<main.WebAuditDiff | null>(null);
   const [isReconBusy, setIsReconBusy] = useState(false);
   const [reconError, setReconError] = useState('');
   const [isHistoryBusy, setIsHistoryBusy] = useState(false);
@@ -147,7 +158,7 @@ export default function App() {
     setHttpResults([]);
     setHttpError('');
     try {
-      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch);
+      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs));
       setHttpResults(res || []);
     } catch (error) {
       setHttpError(errorMessage(error, 'Unable to analyze the URLs. Check the inputs and try again.'));
@@ -171,7 +182,7 @@ export default function App() {
     setIsReconBusy(true);
     setReconError('');
     try {
-      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency)));
+      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency), Number(fuzzDelayMs)));
     } catch (error) {
       setReconError(errorMessage(error, 'Unable to run path checks. Try again.'));
     } finally {
@@ -215,14 +226,68 @@ export default function App() {
     setIsHistoryBusy(true);
     setHistoryError('');
     try {
-      setHistoryEntries(await GetScanHistory(50));
-      setPortDiff(await DiffLatestPortScans(historyTarget));
+      const entries = await SearchScanHistory(50, historyTypeFilter === 'all' ? '' : historyTypeFilter, historySearch.trim());
+      setHistoryEntries(entries || []);
+      const target = historyTarget.trim();
+      setPortDiff(target ? await DiffLatestPortScans(target) : null);
+      setWebAuditDiff(target ? await DiffLatestWebAuditScans(target) : null);
     } catch (error) {
       setHistoryError(errorMessage(error, 'Unable to load local scan history. Try again.'));
+      setHistoryEntries([]);
+      setPortDiff(null);
+      setWebAuditDiff(null);
     } finally {
       setIsHistoryBusy(false);
     }
   };
+
+  const runWebAuditDiff = async () => {
+    setIsHistoryBusy(true);
+    setHistoryError('');
+    try {
+      const target = historyTarget.trim();
+      setWebAuditDiff(target ? await DiffLatestWebAuditScans(target) : null);
+    } catch (error) {
+      setHistoryError(errorMessage(error, 'Unable to compare Web Audit snapshots. Try again.'));
+      setWebAuditDiff(null);
+    } finally {
+      setIsHistoryBusy(false);
+    }
+  };
+
+  const handleDeleteHistoryEntry = async (id: number) => {
+    if (!window.confirm('Delete this history entry? This cannot be undone.')) return;
+    setIsHistoryBusy(true);
+    setHistoryError('');
+    try {
+      await DeleteScanHistoryEntry(id);
+      await refreshHistory();
+    } catch (error) {
+      setHistoryError(errorMessage(error, 'Unable to delete the history entry. Try again.'));
+      setIsHistoryBusy(false);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!window.confirm('Clear all local scan history? This cannot be undone.')) return;
+    setIsHistoryBusy(true);
+    setHistoryError('');
+    try {
+      await ClearScanHistory();
+      setHistoryEntries([]);
+      setPortDiff(null);
+      setWebAuditDiff(null);
+    } catch (error) {
+      setHistoryError(errorMessage(error, 'Unable to clear local scan history. Try again.'));
+    } finally {
+      setIsHistoryBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const addSubdomainsToHTTP = () => {
     if (!subdomainResult) return;
     setBulkUrls(subdomainResult.names.slice(0, 100).map((name) => `https://${name}`).join('\n'));
@@ -260,19 +325,127 @@ export default function App() {
     catch { return raw; }
   };
 
+  const escapeHtml = (value: unknown) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const buildWebAuditSummary = (results: main.BulkHeaderResult[]) => {
+    const sev = { critical: 0, high: 0, medium: 0, low: 0, info: 0 } as Record<string, number>;
+    let riskTotal = 0;
+    let graded = 0;
+    let errors = 0;
+    for (const r of results) {
+      if (r.error) { errors += 1; continue; }
+      if (typeof r.riskScore === 'number') { riskTotal += r.riskScore; graded += 1; }
+      for (const f of r.findings || []) {
+        const s = String(f.severity || 'info').toLowerCase();
+        sev[s] = (sev[s] || 0) + 1;
+      }
+    }
+    const avgRisk = graded ? Math.round(riskTotal / graded) : 0;
+    return { sev, avgRisk, errors, targets: results.length, findings: Object.values(sev).reduce((a, b) => a + b, 0) };
+  };
+
+  const buildWebAuditHTML = (results: main.BulkHeaderResult[]) => {
+    const summary = buildWebAuditSummary(results);
+    const rows = results.map((r) => `
+      <section class="card">
+        <h2>${escapeHtml(r.url || '(unknown target)')}</h2>
+        ${r.error ? `<p class="error"><strong>Error:</strong> ${escapeHtml(r.error)}</p>` : `
+        <p><strong>Status:</strong> ${escapeHtml(r.statusCode)} &nbsp; <strong>Grade:</strong> ${escapeHtml(r.grade)} &nbsp; <strong>Risk:</strong> ${escapeHtml(r.riskScore)}/100</p>
+        ${r.finalUrl && r.finalUrl !== r.url ? `<p><strong>Final URL:</strong> ${escapeHtml(r.finalUrl)}</p>` : ''}
+        ${r.title ? `<p><strong>Title:</strong> ${escapeHtml(r.title)}</p>` : ''}
+        ${(r.findings || []).length ? `<h3>Findings &amp; remediation</h3><ul>${(r.findings || []).map((f) => `<li><strong>[${escapeHtml(f.severity)}]</strong> ${escapeHtml(f.title)}${f.evidence ? `<br/><em>Evidence:</em> ${escapeHtml(f.evidence)}` : ''}${f.description ? `<br/>${escapeHtml(f.description)}` : ''}${f.recommendation ? `<br/><em>Remediation:</em> ${escapeHtml(f.recommendation)}` : ''}</li>`).join('')}</ul>` : '<p>No passive findings reported.</p>'}
+        ${(r.missing || []).length ? `<p><strong>Missing headers:</strong> ${r.missing.map(escapeHtml).join(', ')}</p>` : ''}
+        `}
+      </section>`).join('');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Codexa Scanner - Web Audit Report</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#020617;color:#e2e8f0;margin:24px;line-height:1.5}h1{color:#34d399;margin:0 0 4px} .muted{color:#94a3b8} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0} .stat{background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:12px} .card{background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:14px;margin:12px 0} .error{color:#fca5a5} ul{margin:8px 0 0 18px} li{margin:6px 0} a{color:#34d399}</style></head><body>
+<h1>Web Audit Summary Report</h1>
+<p class="muted">Generated ${escapeHtml(new Date().toISOString())} · Codexa Scanner · Developed by <a href="https://arkaryan.net/">H!D3-C4rD</a></p>
+<div class="grid">
+  <div class="stat"><div class="muted">Targets</div><div><strong>${summary.targets}</strong></div></div>
+  <div class="stat"><div class="muted">Errors</div><div><strong>${summary.errors}</strong></div></div>
+  <div class="stat"><div class="muted">Avg Risk</div><div><strong>${summary.avgRisk}/100</strong></div></div>
+  <div class="stat"><div class="muted">Findings</div><div><strong>${summary.findings}</strong></div></div>
+  <div class="stat"><div class="muted">Critical/High</div><div><strong>${summary.sev.critical + summary.sev.high}</strong></div></div>
+  <div class="stat"><div class="muted">Med/Low/Info</div><div><strong>${summary.sev.medium}/${summary.sev.low}/${summary.sev.info}</strong></div></div>
+</div>
+${rows || '<p>No results.</p>'}
+<p class="muted">Bounded passive analysis of observed responses; findings are heuristics, not proof of exploitability. Review and redact sensitive data before sharing.</p>
+</body></html>`;
+  };
+
+  const buildWebAuditMarkdown = (results: main.BulkHeaderResult[]) => {
+    const summary = buildWebAuditSummary(results);
+    const lines: string[] = [];
+    lines.push('# Web Audit Summary Report');
+    lines.push('');
+    lines.push(`- Generated: ${new Date().toISOString()}`);
+    lines.push('- Tool: Codexa Scanner');
+    lines.push('- Developed by: [H!D3-C4rD](https://arkaryan.net/)');
+    lines.push('');
+    lines.push('## Summary');
+    lines.push(`- Targets: ${summary.targets} (errors: ${summary.errors})`);
+    lines.push(`- Average risk: ${summary.avgRisk}/100`);
+    lines.push(`- Findings: ${summary.findings} (critical ${summary.sev.critical}, high ${summary.sev.high}, medium ${summary.sev.medium}, low ${summary.sev.low}, info ${summary.sev.info})`);
+    lines.push('');
+    for (const r of results) {
+      lines.push(`## ${r.url || '(unknown target)'}`);
+      if (r.error) {
+        lines.push(`- Error: ${r.error}`);
+        lines.push('');
+        continue;
+      }
+      lines.push(`- Status: ${r.statusCode} | Grade: ${r.grade} | Risk: ${r.riskScore}/100`);
+      if (r.finalUrl && r.finalUrl !== r.url) lines.push(`- Final URL: ${r.finalUrl}`);
+      if (r.title) lines.push(`- Title: ${r.title}`);
+      if ((r.missing || []).length) lines.push(`- Missing headers: ${r.missing.join(', ')}`);
+      if ((r.findings || []).length) {
+        lines.push('- Findings & remediation:');
+        for (const f of r.findings || []) {
+          lines.push(`  - **[${f.severity}] ${f.title}**${f.evidence ? ` (evidence: ${f.evidence})` : ''}`);
+          if (f.description) lines.push(`    - ${f.description}`);
+          if (f.recommendation) lines.push(`    - Remediation: ${f.recommendation}`);
+        }
+      } else {
+        lines.push('- No passive findings reported.');
+      }
+      lines.push('');
+    }
+    lines.push('> Bounded passive analysis of observed responses; findings are heuristics, not proof of exploitability. Review and redact sensitive data before sharing.');
+    return lines.join('\n');
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 px-3 py-4 font-sans sm:px-5 sm:py-6 lg:px-8 app-shell">
       {/* Top Navbar */}
       <header className="mb-5 flex flex-col gap-4 border-b border-slate-800 pb-4 sm:mb-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${isScanning || isAnalyzing || isReconBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} />
+          <img src="/logo.svg" alt="" className="h-10 w-10 shrink-0 rounded-xl ring-1 ring-emerald-500/30 shadow-sm shadow-emerald-950/40" />
           <div className="min-w-0">
-            <h1 className="text-base font-bold tracking-[0.14em] text-emerald-400 sm:text-lg">CODEXA SCANNER</h1>
-            <p className="text-[11px] leading-relaxed text-slate-500 sm:text-xs">Authorized Network & Web Security Assessment</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold tracking-[0.14em] text-emerald-400 sm:text-lg">CODEXA SCANNER</h1>
+              <span className={`h-2.5 w-2.5 rounded-full ${isScanning || isAnalyzing || isReconBusy || isHistoryBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} title={isScanning || isAnalyzing || isReconBusy || isHistoryBusy ? 'Busy' : 'Ready'} />
+            </div>
+            <p className="text-[11px] leading-relaxed text-slate-500 sm:text-xs">Authorized Network &amp; Web Security Assessment</p>
           </div>
         </div>
 
-        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[68%] lg:grid-cols-4 xl:grid-cols-7">
+        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[72%] lg:grid-cols-4 xl:grid-cols-8">
+          <button
+            type="button"
+            onClick={() => { setActiveTab('dashboard'); void refreshHistory(); }}
+            aria-pressed={activeTab === 'dashboard'}
+            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
+              activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            Dashboard
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('scanner')}
@@ -308,6 +481,147 @@ export default function App() {
         <div role="alert" className="mb-4 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">
           {reconError}
         </div>
+      )}
+
+      {activeTab === 'dashboard' && (
+        (() => {
+          const recent = historyEntries.slice(0, 8);
+          const latestPort = historyEntries.find((e) => e.scanType === 'port');
+          const latestHTTP = historyEntries.find((e) => e.scanType === 'http');
+          let latestPortCount = 0;
+          let latestPortParseError = false;
+          if (latestPort) {
+            try {
+              const parsed = JSON.parse(latestPort.result);
+              latestPortCount = Array.isArray(parsed) ? parsed.length : 0;
+            } catch {
+              latestPortParseError = true;
+            }
+          }
+          const httpSeverity: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+          let latestHTTPTargets = 0;
+          let latestHTTPAvgRisk = 0;
+          let latestHTTPParseError = false;
+          if (latestHTTP) {
+            try {
+              const parsed = JSON.parse(latestHTTP.result);
+              const results = Array.isArray(parsed) ? parsed : [];
+              latestHTTPTargets = results.length;
+              let riskTotal = 0;
+              let riskCount = 0;
+              for (const r of results) {
+                if (typeof r?.riskScore === 'number') { riskTotal += r.riskScore; riskCount += 1; }
+                const findings = Array.isArray(r?.findings) ? r.findings : [];
+                for (const f of findings) {
+                  const sev = String(f?.severity || '').toLowerCase();
+                  if (sev in httpSeverity) httpSeverity[sev] += 1;
+                  else if (sev) httpSeverity.info += 1;
+                }
+              }
+              latestHTTPAvgRisk = riskCount ? Math.round(riskTotal / riskCount) : 0;
+            } catch {
+              latestHTTPParseError = true;
+            }
+          }
+          const totalFindings = Object.values(httpSeverity).reduce((a, b) => a + b, 0);
+          const hasData = historyEntries.length > 0 || httpResults.length > 0 || findings.length > 0;
+          const exportHistoryJSON = () => void ExportJSON('scan_history.json', JSON.stringify(historyEntries));
+          const Stat = ({ label, value, note }: { label: string; value: string | number; note?: string }) => (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+              <div className="mt-1 text-2xl font-bold text-slate-100">{value}</div>
+              {note ? <div className="mt-1 text-xs text-slate-400">{note}</div> : null}
+            </div>
+          );
+          return (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-100">Dashboard</h2>
+                    <p className="text-xs text-slate-400">Summary from locally stored history and current in-app results. Run a scan or refresh history to populate.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold disabled:bg-slate-700">{isHistoryBusy ? 'Loading…' : 'Refresh'}</button>
+                    <button onClick={exportHistoryJSON} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
+                    <button onClick={() => setActiveTab('history')} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open History</button>
+                  </div>
+                </div>
+                {historyError && <p role="alert" className="mt-3 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{historyError}</p>}
+              </div>
+
+              {!hasData && !isHistoryBusy ? (
+                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center">
+                  <p className="text-sm font-semibold text-slate-200">No scan data yet</p>
+                  <p className="mt-2 text-xs text-slate-400">Start with an authorized port scan or Web Audit. History-backed summaries appear here once results are stored locally.</p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    <button onClick={() => setActiveTab('scanner')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold">Open Ports</button>
+                    <button onClick={() => setActiveTab('analyzer')} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open Web Audit</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <Stat label="History records" value={historyEntries.length} note={historyEntries.length ? 'Latest 50 loaded from local SQLite' : 'No local records loaded'} />
+                    <Stat label="Latest port scan" value={latestPort ? latestPortCount : '—'} note={latestPort ? `${latestPort.target}${latestPortParseError ? ' (result unreadable)' : ' open ports in snapshot'}` : 'No port scan saved yet'} />
+                    <Stat label="Latest Web Audit" value={latestHTTP ? `${latestHTTPTargets} target(s)` : '—'} note={latestHTTP ? (latestHTTPParseError ? 'Result unreadable' : `Avg risk ${latestHTTPAvgRisk}/100`) : 'No Web Audit saved yet'} />
+                    <Stat label="Finding severity (latest Web Audit)" value={totalFindings} note={latestHTTP ? 'Counts from stored findings' : 'No findings summary available'} />
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+                      <h3 className="text-sm font-bold">Open ports / findings breakdown</h3>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="rounded-lg bg-slate-950 p-3">
+                          <div className="text-[11px] text-slate-500">Open ports (latest saved port scan)</div>
+                          <div className="mt-1 text-xl font-bold text-emerald-300">{latestPort ? (latestPortParseError ? 'n/a' : latestPortCount) : '—'}</div>
+                          <div className="text-xs text-slate-400 break-all">{latestPort ? latestPort.target : 'Run a port scan to populate'}</div>
+                        </div>
+                        <div className="rounded-lg bg-slate-950 p-3">
+                          <div className="text-[11px] text-slate-500">Current session (unsaved) context</div>
+                          <div className="mt-1 text-xs text-slate-300">Ports found now: <strong>{findings.length}</strong></div>
+                          <div className="text-xs text-slate-300">Web Audit results now: <strong>{httpResults.length}</strong></div>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {(['critical', 'high', 'medium', 'low', 'info'] as const).map((sev) => {
+                          const count = httpSeverity[sev];
+                          const pct = totalFindings ? Math.round((count / totalFindings) * 100) : 0;
+                          return (
+                            <div key={sev}>
+                              <div className="mb-1 flex items-center justify-between text-xs"><span className="uppercase text-slate-400">{sev}</span><span className="text-slate-300">{count}</span></div>
+                              <div className="h-2 overflow-hidden rounded bg-slate-800"><div className={`h-full ${sev === 'critical' || sev === 'high' ? 'bg-rose-500' : sev === 'medium' ? 'bg-amber-500' : sev === 'low' ? 'bg-sky-500' : 'bg-slate-500'}`} style={{ width: `${pct}%` }} /></div>
+                            </div>
+                          );
+                        })}
+                        {!latestHTTP && <p className="text-xs text-slate-500">No saved Web Audit findings to chart yet.</p>}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+                      <h3 className="text-sm font-bold">Recent scans &amp; report links</h3>
+                      {recent.length ? recent.map((entry) => (
+                        <div key={entry.id} className="flex flex-col gap-2 rounded-lg bg-slate-950 p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs"><span className="rounded bg-slate-800 px-2 py-0.5 text-emerald-300">{entry.scanType}</span><span className="break-all text-slate-200">{entry.target}</span></div>
+                            <div className="mt-1 text-[11px] text-slate-500">{new Date(entry.createdAt).toLocaleString()}</div>
+                          </div>
+                          <button onClick={() => void ExportJSON(`scan_${entry.scanType}_${entry.id}.json`, entry.result)} className="shrink-0 rounded border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800">Export</button>
+                        </div>
+                      )) : <p className="text-xs text-slate-500">No recent scan records.</p>}
+                      {portDiff && (portDiff.newPorts.length || portDiff.removedPorts.length) ? (
+                        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs">
+                          <div className="font-semibold text-slate-300">Latest port diff · {portDiff.target}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((p) => <span key={`dn-${p}`} className="rounded border border-rose-800 bg-rose-950/50 px-2 py-0.5 text-rose-300">New {p}</span>)}{portDiff.removedPorts.map((p) => <span key={`dr-${p}`} className="rounded border border-slate-700 px-2 py-0.5 text-slate-300">Closed {p}</span>)}</div>
+                        </div>
+                      ) : portDiff?.target ? <p className="text-xs text-slate-500">No port changes for {portDiff.target} (or fewer than two snapshots).</p> : null}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()
       )}
 
       {/* ========================================= */}
@@ -346,6 +660,21 @@ export default function App() {
                 disabled={isScanning}
                 className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
+            </div>
+
+            <div className="col-span-full">
+              <label className="block text-xs text-slate-400 mb-1">Presets</label>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['Top 100', 1, 100],
+                  ['Top 1000', 1, 1000],
+                  ['Web Ports', 80, 8443],
+                  ['Full (1-1024)', 1, 1024],
+                ] as [string, number, number][]).map(([label, s, e]) => (
+                  <button key={label} type="button" disabled={isScanning} onClick={() => { setStartPort(s); setEndPort(e); setScopeConfirmed(false); }} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40">{label}</button>
+                ))}
+                <span className="self-center text-[11px] text-slate-500">Web Ports preset sets 80–8443; use target service ports as needed (common: 80,443,8080,8443).</span>
+              </div>
             </div>
 
             <div>
@@ -498,14 +827,32 @@ export default function App() {
           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <label className="text-xs text-slate-400">Authorized HTTP/HTTPS URLs (one per line, max 100)</label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">Threads:</span>
-                <input
-                  type="number"
-                  value={httpThreads}
-                  onChange={(e) => setHttpThreads(Number(e.target.value))}
-                  className="w-16 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
-                />
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>Concurrency</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={httpThreads}
+                    onChange={(e) => setHttpThreads(Number(e.target.value))}
+                    disabled={isAnalyzing}
+                    className="w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>Delay (ms)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step={50}
+                    value={httpDelayMs}
+                    onChange={(e) => setHttpDelayMs(Number(e.target.value))}
+                    disabled={isAnalyzing}
+                    className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+                  />
+                </label>
               </div>
             </div>
 
@@ -531,26 +878,40 @@ export default function App() {
               </span>
             </label>
             <p className="text-[11px] leading-relaxed text-slate-500">
-              Redirects stay on each URL’s hostname and allowed ports; cross-host redirects and HTTPS-to-HTTP downgrades are blocked. HTTP-to-HTTPS on standard ports is allowed.
+              Bounded active requests: main GET, observed redirects, and read-only security.txt/robots.txt fetches. Passive analysis: findings and clues derived from observed responses. Redirects stay on each URL’s hostname and allowed ports; cross-host redirects and HTTPS-to-HTTP downgrades are blocked. HTTP-to-HTTPS on standard ports is allowed.
             </p>
             {httpError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{httpError}</p>}
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleBulkAnalyze}
                 disabled={isAnalyzing}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-semibold py-2 rounded-lg text-xs transition"
+                className="flex-1 min-w-[180px] bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-semibold py-2 rounded-lg text-xs transition"
               >
                 {isAnalyzing ? 'Analyzing Targets...' : 'Analyze All Targets'}
               </button>
 
               {httpResults.length > 0 && (
-                <button
-                  onClick={() => ExportJSON('http_security_audit.json', JSON.stringify(httpResults))}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold"
-                >
-                  Export JSON Report
-                </button>
+                <>
+                  <button
+                    onClick={() => ExportJSON('http_security_audit.json', JSON.stringify(httpResults))}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-semibold"
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    onClick={() => ExportText('http_security_audit.html', buildWebAuditHTML(httpResults), 'HTML Files (*.html)', '*.html')}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-semibold"
+                  >
+                    Export HTML
+                  </button>
+                  <button
+                    onClick={() => ExportText('http_security_audit.md', buildWebAuditMarkdown(httpResults), 'Markdown Files (*.md)', '*.md')}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-semibold"
+                  >
+                    Export Markdown
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -565,6 +926,11 @@ export default function App() {
                     {!res.error && (
                       <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
                         HTTP {res.statusCode}
+                      </span>
+                    )}
+                    {res.assessment && (
+                      <span className="text-[10px] rounded border border-sky-900 bg-sky-950/40 px-2 py-0.5 text-sky-300">
+                        {res.assessment}
                       </span>
                     )}
                   </div>
@@ -622,8 +988,12 @@ export default function App() {
                     ) : null}
 
                     {res.tls && (
-                      <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-                        TLS {res.tls.version} · {res.tls.cipherSuite} · Certificate {res.tls.verified ? 'verified' : 'not verified'} · Expires {new Date(res.tls.expiresAt).toLocaleDateString()} ({res.tls.daysRemaining} days)
+                      <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200 space-y-1">
+                        <div>TLS {res.tls.version} · {res.tls.cipherSuite} · {res.tls.verified ? 'Certificate verified' : 'Certificate not verified'}</div>
+                        <div>{res.tls.verificationSummary || (res.tls.verified ? 'Verified by system trust store' : 'Not verified by system trust store')}</div>
+                        <div>Leaf: {res.tls.subject || 'unknown'} · Issuer: {res.tls.issuer || 'unknown'}</div>
+                        <div>Valid: {res.tls.notBefore ? new Date(res.tls.notBefore).toLocaleDateString() : 'n/a'} – {new Date(res.tls.expiresAt).toLocaleDateString()} ({res.tls.daysRemaining} days remaining) · SANs: {res.tls.sanCount ?? 0}</div>
+                        {res.tls.chainSubjects?.length ? <div className="text-emerald-300/90">Presented chain: {res.tls.chainSubjects.join(' → ')}</div> : null}
                       </div>
                     )}
 
@@ -653,6 +1023,36 @@ export default function App() {
                       </div>
                     ) : (
                       <p className="text-xs text-emerald-400">No issues found by these passive checks. This is not proof that the site is vulnerability-free.</p>
+                    )}
+
+                    {(res.securityTxt || res.robotsTxt) && (
+                      <div className="space-y-2 pt-1">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Resource inspectors</div>
+                        {([
+                          ['security.txt', res.securityTxt],
+                          ['robots.txt', res.robotsTxt],
+                        ] as [string, main.WebResourceInspector | undefined][]).map(([label, inspector]) => {
+                          if (!inspector) return null;
+                          return (
+                            <details key={label} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                              <summary className="cursor-pointer text-xs font-semibold text-slate-300">
+                                {label}: {inspector.error ? 'error' : inspector.found ? `found (HTTP ${inspector.statusCode})` : `not found${inspector.statusCode ? ` (HTTP ${inspector.statusCode})` : ''}`}
+                              </summary>
+                              <div className="mt-2 space-y-2 text-xs text-slate-300">
+                                <div className="break-all text-[11px] text-slate-400">{inspector.url}</div>
+                                {inspector.note && <p className="text-amber-300">{inspector.note}</p>}
+                                {inspector.error ? (
+                                  <p className="text-rose-300">{inspector.error}</p>
+                                ) : inspector.found ? (
+                                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border border-slate-800 bg-slate-900 p-2 text-[11px] text-slate-200">{inspector.body}</pre>
+                                ) : (
+                                  <p className="text-slate-400">No readable resource returned at this path.</p>
+                                )}
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
                     )}
 
                     {res.missing && res.missing.length > 0 && (
@@ -699,7 +1099,13 @@ export default function App() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <label className="block text-xs text-slate-400">Authorized base URL</label>
             <input value={fuzzBaseURL} onChange={(e) => setFuzzBaseURL(e.target.value)} placeholder="https://your-site.example" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
-            <div className="flex items-center justify-between gap-3"><label className="text-xs text-slate-400">Path wordlist (max 500)</label><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></div>
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              <label className="text-xs text-slate-400">Path wordlist (max 500)</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Concurrency</span><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Delay (ms)</span><input type="number" min={0} max={5000} step={50} value={fuzzDelayMs} onChange={(e) => setFuzzDelayMs(Number(e.target.value))} className="w-24 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+              </div>
+            </div>
             <textarea rows={7} value={fuzzWordlist} onChange={(e) => setFuzzWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />
             <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking paths…' : 'Run HEAD-only Path Checks'}</button>
             <p className="text-[11px] text-slate-500">Sends bounded HEAD requests only, follows no redirects, and never reads or displays response bodies. A randomized missing-path check filters likely catch-all responses.</p>
@@ -784,16 +1190,59 @@ export default function App() {
       {activeTab === 'history' && (
         <div className="space-y-4">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-            <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries).</p>
+            <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries). Targets/results are saved with bounded redaction (credentials, sensitive URL query/fragments, and sensitive keys); review before sharing.</p>
             {historyError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{historyError}</p>}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm sm:min-w-64" /><button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold transition hover:bg-emerald-500 disabled:bg-slate-700 sm:w-auto">{isHistoryBusy ? 'Loading History…' : 'Refresh History & Compare Ports'}</button></div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search target…" className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+              <select value={historyTypeFilter} onChange={(e) => setHistoryTypeFilter(e.target.value as typeof historyTypeFilter)} className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+                <option value="all">All types</option>
+                <option value="port">port</option>
+                <option value="http">http</option>
+                <option value="subdomain">subdomain</option>
+                <option value="fuzzer">fuzzer</option>
+                <option value="tls">tls</option>
+                <option value="dns">dns</option>
+                <option value="ip">ip</option>
+              </select>
+              <input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="Target for port diff" className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold transition hover:bg-emerald-500 disabled:bg-slate-700">{isHistoryBusy ? 'Loading…' : 'Refresh / Search'}</button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => void runWebAuditDiff()} disabled={isHistoryBusy || !historyTarget.trim()} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Compare Web Audit Diff</button>
+              <button onClick={() => void ExportJSON('scan_history.json', JSON.stringify(historyEntries))} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
+              <button onClick={() => void handleClearHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg border border-rose-800 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-950 disabled:opacity-40">Clear All History</button>
+            </div>
           </div>
-          {portDiff && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div>}
-          <div className="space-y-2">{historyEntries.map((entry) => <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3"><summary className="cursor-pointer break-all text-xs leading-relaxed"><span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}<span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></summary><pre className="mt-3 whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre></details>)}</div>
+          {portDiff && portDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div> : null}
+          {webAuditDiff && webAuditDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2"><h2 className="text-sm font-bold">Web Audit diff · {webAuditDiff.target}</h2><p className="text-xs text-slate-400">Latest: {webAuditDiff.latestAt ? new Date(webAuditDiff.latestAt).toLocaleString() : '—'} · Previous: {webAuditDiff.previousAt ? new Date(webAuditDiff.previousAt).toLocaleString() : '—'}</p>{webAuditDiff.note && <p className="text-xs text-slate-500">{webAuditDiff.note}</p>}{webAuditDiff.urlDiffs?.map((d) => (<div key={d.url} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs space-y-1"><div className="font-semibold text-slate-200 break-all">{d.url}</div><div className="flex flex-wrap gap-2">{d.gradeChanged ? <span className="rounded bg-amber-950 border border-amber-800 px-2 py-0.5 text-amber-300">Grade {d.previousGrade || '—'} → {d.latestGrade || '—'}</span> : <span className="text-slate-500">Grade unchanged ({d.latestGrade || '—'})</span>}<span className="rounded bg-slate-800 px-2 py-0.5">Risk {d.previousRiskScore} → {d.latestRiskScore} ({d.riskScoreDelta >= 0 ? '+' : ''}{d.riskScoreDelta})</span>{d.statusChanged && <span className="rounded bg-slate-800 px-2 py-0.5">Status {d.previousStatus} → {d.latestStatus}</span>}{d.certDaysDelta != null && <span className="rounded bg-slate-800 px-2 py-0.5">Cert days {d.previousCertDays ?? 'n/a'} → {d.latestCertDays ?? 'n/a'} ({d.certDaysDelta >= 0 ? '+' : ''}{d.certDaysDelta})</span>}</div><div className="flex flex-wrap gap-2">{d.newMissingHeaders?.map((h) => <span key={`nm-${h}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New missing: {h}</span>)}{d.resolvedMissingHeaders?.map((h) => <span key={`rm-${h}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved missing: {h}</span>)}{d.newFindingIds?.map((id) => <span key={`nf-${id}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New finding: {id}</span>)}{d.resolvedFindingIds?.map((id) => <span key={`rf-${id}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved finding: {id}</span>)}</div>{!d.gradeChanged && d.riskScoreDelta === 0 && !d.statusChanged && d.certDaysDelta == null && !(d.newMissingHeaders?.length) && !(d.resolvedMissingHeaders?.length) && !(d.newFindingIds?.length) && !(d.resolvedFindingIds?.length) && <span className="text-slate-500">No compared changes detected.</span>}</div>))}</div> : null}
+          <div className="space-y-2">
+            {!isHistoryBusy && historyEntries.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-6 text-center text-xs text-slate-400">No history records match the current search/filter. Run scans or clear filters to see stored results.</div>
+            ) : historyEntries.map((entry) => (
+              <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                <summary className="cursor-pointer break-all text-xs leading-relaxed">
+                  <span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}
+                  <span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
+                </summary>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => void ExportJSON(`scan_${entry.scanType}_${entry.id}.json`, entry.result)} className="rounded border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800">Export</button>
+                  <button onClick={() => void handleDeleteHistoryEntry(entry.id)} disabled={isHistoryBusy} className="rounded border border-rose-800 bg-rose-950/30 px-2.5 py-1.5 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40">Delete</button>
+                </div>
+                <pre className="mt-3 whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre>
+              </details>
+            ))}
+          </div>
         </div>
       )}
       </main>
-      <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">Develop by H!D3-C4rD</footer>
+      <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">
+        Developed by{' '}
+        <button type="button" onClick={() => BrowserOpenURL('https://arkaryan.net/')} className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
+          H!D3-C4rD
+        </button>
+      </footer>
     </div>
   );
 }

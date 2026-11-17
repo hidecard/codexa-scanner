@@ -59,7 +59,7 @@ func TestAuditHTTPResponseAcceptsConfiguredHeadersAndCookies(t *testing.T) {
 	resp := &http.Response{
 		Header: http.Header{
 			"Strict-Transport-Security": []string{"max-age=31536000"},
-			"Content-Security-Policy":   []string{"default-src 'self'; frame-ancestors 'none'"},
+			"Content-Security-Policy":   []string{"default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"},
 			"X-Content-Type-Options":    []string{"nosniff"},
 			"Referrer-Policy":           []string{"strict-origin-when-cross-origin"},
 			"Permissions-Policy":        []string{"camera=()"},
@@ -74,6 +74,47 @@ func TestAuditHTTPResponseAcceptsConfiguredHeadersAndCookies(t *testing.T) {
 	score, grade := gradeFindings(findings)
 	if score != 0 || grade != "A+" {
 		t.Fatalf("expected 0/A+, got %d/%s", score, grade)
+	}
+}
+
+func TestAuditHTTPResponseReportsCSPDiagnosticsWithEvidence(t *testing.T) {
+	target, _ := url.Parse("https://site.example")
+	resp := &http.Response{
+		Header: http.Header{
+			"Strict-Transport-Security": []string{"max-age=31536000"},
+			"Content-Security-Policy":   []string{"script-src 'self' 'unsafe-inline' 'unsafe-eval' *; frame-ancestors 'none'"},
+			"X-Content-Type-Options":    []string{"nosniff"},
+			"Referrer-Policy":           []string{"strict-origin-when-cross-origin"},
+			"Permissions-Policy":        []string{"camera=()"},
+		},
+		Request: &http.Request{URL: target},
+	}
+	findings := auditHTTPResponse(resp, []byte("<html></html>"))
+	byID := map[string]SecurityFinding{}
+	for _, finding := range findings {
+		byID[finding.ID] = finding
+	}
+	for _, id := range []string{
+		"csp-script-unsafe-inline",
+		"csp-script-unsafe-eval",
+		"csp-script-wildcard-source",
+		"csp-default-src-missing",
+		"csp-object-src-missing",
+		"csp-base-uri-missing",
+	} {
+		finding, ok := byID[id]
+		if !ok {
+			t.Fatalf("expected CSP finding %q, got %+v", id, findings)
+		}
+		if strings.TrimSpace(finding.Evidence) == "" {
+			t.Fatalf("expected evidence for %q", id)
+		}
+		if finding.Severity == "" || finding.Recommendation == "" {
+			t.Fatalf("expected severity/recommendation for %q: %+v", id, finding)
+		}
+	}
+	if _, ok := byID["csp-missing"]; ok {
+		t.Fatalf("did not expect csp-missing when policy is present: %+v", findings)
 	}
 }
 
@@ -301,7 +342,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false)
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
 		t.Fatalf("expected private target policy error, got %+v", results)
 	}
@@ -309,12 +350,12 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 		t.Fatalf("request reached private target without opt-in (%d requests)", got)
 	}
 
-	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true)
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0)
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
-	if got := atomic.LoadInt32(&requests); got != 1 {
-		t.Fatalf("expected one loopback request after opt-in, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("expected main request plus security.txt/robots.txt inspector requests after opt-in, got %d", got)
 	}
 }
 
@@ -331,7 +372,7 @@ func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testi
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true)
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
 		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
 	}
@@ -381,8 +422,11 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 	if got := lookup.lookupCount(); got != 1 {
 		t.Fatalf("expected hostname to resolve once across redirect chain, got %d lookups", got)
 	}
-	if got := atomic.LoadInt32(&requests); got != 2 {
-		t.Fatalf("expected initial and redirected request, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 4 {
+		t.Fatalf("expected initial, redirected, and security.txt/robots.txt inspector requests, got %d", got)
+	}
+	if result.SecurityTxt == nil || result.RobotsTxt == nil {
+		t.Fatalf("expected inspector results, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
 	}
 }
 
@@ -403,8 +447,11 @@ func TestAnalyzeURLStopsAfterFiveRedirects(t *testing.T) {
 	if !strings.Contains(result.Error, "after five hops") {
 		t.Fatalf("expected five-hop redirect limit error, got %+v", result)
 	}
-	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+1 {
-		t.Fatalf("expected initial request plus five redirects, got %d requests", got)
+	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+3 {
+		t.Fatalf("expected initial request, five redirects, and security.txt/robots.txt inspector requests, got %d requests", got)
+	}
+	if result.SecurityTxt == nil || result.RobotsTxt == nil {
+		t.Fatalf("expected inspector results on redirect-limit error, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
 	}
 }
 
@@ -692,5 +739,85 @@ func TestPortScanReportsCompletedStatus(t *testing.T) {
 	}
 	if scan.status != scanStatusCompleted {
 		t.Fatalf("finished scan should report completed, got %q", scan.status)
+	}
+}
+
+func TestAnalyzeURLInspectsSecurityTxtAndRobotsTxt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/security.txt":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("Contact: mailto:security@example.test\nExpires: 2030-01-01T00:00:00.000Z\n"))
+		case "/robots.txt":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("User-agent: *\nDisallow: /private\n"))
+		default:
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Permissions-Policy", "camera=()")
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	client, err := newScopedHTTPClient(server.URL, true, net.DefaultResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	result := analyzeURL(server.URL, client, nil)
+	if result.Error != "" {
+		t.Fatalf("unexpected analysis error: %s", result.Error)
+	}
+	if result.SecurityTxt == nil || !result.SecurityTxt.Found || result.SecurityTxt.StatusCode != http.StatusOK {
+		t.Fatalf("expected security.txt inspector result, got %+v", result.SecurityTxt)
+	}
+	if !strings.Contains(result.SecurityTxt.Body, "Contact: mailto:security@example.test") {
+		t.Fatalf("unexpected security.txt body: %q", result.SecurityTxt.Body)
+	}
+	if !strings.HasSuffix(result.SecurityTxt.URL, "/.well-known/security.txt") {
+		t.Fatalf("expected security.txt URL, got %q", result.SecurityTxt.URL)
+	}
+	if result.RobotsTxt == nil || !result.RobotsTxt.Found || result.RobotsTxt.StatusCode != http.StatusOK {
+		t.Fatalf("expected robots.txt inspector result, got %+v", result.RobotsTxt)
+	}
+	if !strings.Contains(result.RobotsTxt.Body, "Disallow: /private") {
+		t.Fatalf("unexpected robots.txt body: %q", result.RobotsTxt.Body)
+	}
+	if !strings.Contains(result.RobotsTxt.Note, "discovery guidance") {
+		t.Fatalf("expected robots.txt guidance note, got %+v", result.RobotsTxt)
+	}
+}
+
+func TestAnalyzeURLReportsMissingSecurityTxtAndRobotsTxt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/security.txt", "/robots.txt":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Permissions-Policy", "camera=()")
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	client, err := newScopedHTTPClient(server.URL, true, net.DefaultResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	result := analyzeURL(server.URL, client, nil)
+	if result.Error != "" {
+		t.Fatalf("unexpected analysis error: %s", result.Error)
+	}
+	if result.SecurityTxt == nil || result.SecurityTxt.Found || result.SecurityTxt.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected missing security.txt inspector result, got %+v", result.SecurityTxt)
+	}
+	if result.RobotsTxt == nil || result.RobotsTxt.Found || result.RobotsTxt.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected missing robots.txt inspector result, got %+v", result.RobotsTxt)
 	}
 }

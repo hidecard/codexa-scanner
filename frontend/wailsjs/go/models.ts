@@ -1,5 +1,5 @@
 export namespace main {
-
+	
 	export class SecurityFinding {
 	    id: string;
 	    severity: string;
@@ -7,11 +7,11 @@ export namespace main {
 	    description: string;
 	    recommendation: string;
 	    evidence?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SecurityFinding(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -20,6 +20,28 @@ export namespace main {
 	        this.description = source["description"];
 	        this.recommendation = source["recommendation"];
 	        this.evidence = source["evidence"];
+	    }
+	}
+	export class WebResourceInspector {
+	    url: string;
+	    statusCode: number;
+	    found: boolean;
+	    body?: string;
+	    error?: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WebResourceInspector(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.statusCode = source["statusCode"];
+	        this.found = source["found"];
+	        this.body = source["body"];
+	        this.error = source["error"];
+	        this.note = source["note"];
 	    }
 	}
 	export class TLSDetails {
@@ -31,11 +53,16 @@ export namespace main {
 	    expiresAt: any;
 	    daysRemaining: number;
 	    verified: boolean;
-
+	    verificationSummary?: string;
+	    chainSubjects?: string[];
+	    // Go type: time
+	    notBefore?: any;
+	    sanCount?: number;
+	
 	    static createFrom(source: any = {}) {
 	        return new TLSDetails(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -45,8 +72,12 @@ export namespace main {
 	        this.expiresAt = this.convertValues(source["expiresAt"], null);
 	        this.daysRemaining = source["daysRemaining"];
 	        this.verified = source["verified"];
+	        this.verificationSummary = source["verificationSummary"];
+	        this.chainSubjects = source["chainSubjects"];
+	        this.notBefore = this.convertValues(source["notBefore"], null);
+	        this.sanCount = source["sanCount"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -69,11 +100,11 @@ export namespace main {
 	    from: string;
 	    to: string;
 	    statusCode: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RedirectHop(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.from = source["from"];
@@ -81,11 +112,11 @@ export namespace main {
 	        this.statusCode = source["statusCode"];
 	    }
 	}
-
 	export class BulkHeaderResult {
 	    url: string;
 	    finalUrl: string;
-	    redirects: RedirectHop[];
+	    assessment?: string;
+	    redirects?: RedirectHop[];
 	    statusCode: number;
 	    title: string;
 	    server: string;
@@ -97,17 +128,20 @@ export namespace main {
 	    missing: string[];
 	    present: Record<string, string>;
 	    tls?: TLSDetails;
+	    securityTxt?: WebResourceInspector;
+	    robotsTxt?: WebResourceInspector;
 	    findings: SecurityFinding[];
 	    error: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BulkHeaderResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
 	        this.finalUrl = source["finalUrl"];
+	        this.assessment = source["assessment"];
 	        this.redirects = this.convertValues(source["redirects"], RedirectHop);
 	        this.statusCode = source["statusCode"];
 	        this.title = source["title"];
@@ -120,10 +154,12 @@ export namespace main {
 	        this.missing = source["missing"];
 	        this.present = source["present"];
 	        this.tls = this.convertValues(source["tls"], TLSDetails);
+	        this.securityTxt = this.convertValues(source["securityTxt"], WebResourceInspector);
+	        this.robotsTxt = this.convertValues(source["robotsTxt"], WebResourceInspector);
 	        this.findings = this.convertValues(source["findings"], SecurityFinding);
 	        this.error = source["error"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -148,11 +184,11 @@ export namespace main {
 	    country?: string;
 	    name?: string;
 	    source: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RDAPInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ip = source["ip"];
@@ -174,11 +210,11 @@ export namespace main {
 	    ptr: Record<string, Array<string>>;
 	    rdap?: RDAPInfo[];
 	    errors?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DNSIntelligenceResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.domain = source["domain"];
@@ -193,7 +229,7 @@ export namespace main {
 	        this.rdap = this.convertValues(source["rdap"], RDAPInfo);
 	        this.errors = source["errors"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -219,11 +255,11 @@ export namespace main {
 	    result: string;
 	    // Go type: time
 	    createdAt: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new HistoryEntry(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -232,7 +268,47 @@ export namespace main {
 	        this.result = source["result"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	    }
-
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class IPInformationResult {
+	    ip: string;
+	    addressClass: string;
+	    reverseDns: string[];
+	    rdap?: RDAPInfo;
+	    sources: string[];
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new IPInformationResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ip = source["ip"];
+	        this.addressClass = source["addressClass"];
+	        this.reverseDns = source["reverseDns"];
+	        this.rdap = this.convertValues(source["rdap"], RDAPInfo);
+	        this.sources = source["sources"];
+	        this.errors = source["errors"];
+	    }
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -255,11 +331,11 @@ export namespace main {
 	    url: string;
 	    statusCode: number;
 	    contentLength: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PathFinding(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
@@ -271,18 +347,18 @@ export namespace main {
 	    baseUrl: string;
 	    paths: PathFinding[];
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PathFuzzResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.baseUrl = source["baseUrl"];
 	        this.paths = this.convertValues(source["paths"], PathFinding);
 	        this.error = source["error"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -305,11 +381,11 @@ export namespace main {
 	    port: number;
 	    service: string;
 	    banner: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PortFinding(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.port = source["port"];
@@ -325,11 +401,11 @@ export namespace main {
 	    previousAt?: any;
 	    newPorts: number[];
 	    removedPorts: number[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PortScanDiff(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.target = source["target"];
@@ -338,7 +414,7 @@ export namespace main {
 	        this.newPorts = source["newPorts"];
 	        this.removedPorts = source["removedPorts"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -357,17 +433,18 @@ export namespace main {
 		    return a;
 		}
 	}
-
-
+	
+	
+	
 	export class SubdomainResult {
 	    domain: string;
 	    names: string[];
 	    errors?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SubdomainResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.domain = source["domain"];
@@ -375,48 +452,7 @@ export namespace main {
 	        this.errors = source["errors"];
 	    }
 	}
-
-	export class IPInformationResult {
-	    ip: string;
-	    addressClass: string;
-	    reverseDns: string[];
-	    rdap?: RDAPInfo;
-	    sources: string[];
-	    errors?: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new IPInformationResult(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ip = source["ip"];
-	        this.addressClass = source["addressClass"];
-	        this.reverseDns = source["reverseDns"];
-	        this.rdap = this.convertValues(source["rdap"], RDAPInfo);
-	        this.sources = source["sources"];
-	        this.errors = source["errors"];
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
+	
 	export class TLSInspection {
 	    host: string;
 	    port: string;
@@ -437,11 +473,11 @@ export namespace main {
 	    tls11Status: string;
 	    tls10Error?: string;
 	    tls11Error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TLSInspection(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.host = source["host"];
@@ -462,7 +498,7 @@ export namespace main {
 	        this.tls10Error = source["tls10Error"];
 	        this.tls11Error = source["tls11Error"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -481,5 +517,115 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class WebAuditURLDiff {
+	    url: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    gradeChanged: boolean;
+	    previousGrade?: string;
+	    latestGrade?: string;
+	    riskScoreDelta: number;
+	    previousRiskScore: number;
+	    latestRiskScore: number;
+	    statusChanged: boolean;
+	    previousStatus: number;
+	    latestStatus: number;
+	    newMissingHeaders: string[];
+	    resolvedMissingHeaders: string[];
+	    newFindingIds: string[];
+	    resolvedFindingIds: string[];
+	    certDaysDelta?: number;
+	    previousCertDays?: number;
+	    latestCertDays?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WebAuditURLDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.gradeChanged = source["gradeChanged"];
+	        this.previousGrade = source["previousGrade"];
+	        this.latestGrade = source["latestGrade"];
+	        this.riskScoreDelta = source["riskScoreDelta"];
+	        this.previousRiskScore = source["previousRiskScore"];
+	        this.latestRiskScore = source["latestRiskScore"];
+	        this.statusChanged = source["statusChanged"];
+	        this.previousStatus = source["previousStatus"];
+	        this.latestStatus = source["latestStatus"];
+	        this.newMissingHeaders = source["newMissingHeaders"];
+	        this.resolvedMissingHeaders = source["resolvedMissingHeaders"];
+	        this.newFindingIds = source["newFindingIds"];
+	        this.resolvedFindingIds = source["resolvedFindingIds"];
+	        this.certDaysDelta = source["certDaysDelta"];
+	        this.previousCertDays = source["previousCertDays"];
+	        this.latestCertDays = source["latestCertDays"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WebAuditDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    urlDiffs: WebAuditURLDiff[];
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WebAuditDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.urlDiffs = this.convertValues(source["urlDiffs"], WebAuditURLDiff);
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 
 }
+

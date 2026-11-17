@@ -1,6 +1,6 @@
 # Codexa Scanner
 
-Desktop network reconnaissance and HTTP security-header inspection application built with Go, Wails v2, React, and TypeScript. The GUI credits **Develop by H!D3-C4rD**.
+Desktop network reconnaissance and HTTP security-header inspection application built with Go, Wails v2, React, and TypeScript. Developed by [H!D3-C4rD](https://arkaryan.net/).
 
 > **Authorized-use notice:** Use only against systems you own or have explicit permission to assess. Port scanning and HTTP requests may be logged, trigger defensive controls, or violate policy or law when performed without authorization. Checks are passive and non-exploitative; results are indicators for review, not proof of exploitability or a substitute for a professional assessment.
 
@@ -11,6 +11,9 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Port-scan targets accept bare IPv4/IPv6 addresses or ASCII DNS hostnames; URLs, ports, malformed names, and control characters are rejected. Each scan requires explicit authorization confirmation for its exact target and selected port range. Authorized private/lab targets are not blanket-blocked.
 - Best-effort service identification and banner collection for reachable ports.
 - Bulk HTTP/HTTPS URL checks with bounded concurrency, page title and response metadata extraction; each URL has its own host/port redirect scope and a five-hop cap. Same-host redirects are allowed, including HTTP port 80 to HTTPS port 443; cross-host redirects, HTTPS downgrades, and other port changes are blocked. Results show each observed redirect hop with status, source, and destination.
+- Bounded, read-only `/.well-known/security.txt` and `/robots.txt` inspectors on the submitted origin using the same scoped HTTP client. `robots.txt` is labeled as discovery guidance, not a security control.
+- Explicit CSP directive diagnostics with evidence (for example `unsafe-inline`/`unsafe-eval`/wildcard script sources and missing baseline directives) without claiming a policy is safe.
+- Web Audit results and JSON exports label bounded active HTTP activity separately from passive response analysis, and HTTPS results include certificate verification summary, validity, SAN count, and presented chain subjects when available.
 - Hostnames resolve once per submitted URL; the complete DNS answer set is policy-checked and one deterministic address is pinned through the request/redirect chain. Literal IPs skip DNS. Ambient proxies are disabled so they cannot bypass address checks.
 - Private RFC1918, IPv6 ULA, and loopback targets require a default-off, one-shot opt-in for authorized lab use. Link-local, multicast, unspecified, and special-use/reserved addresses remain blocked.
 - Passive checks for HTTPS transport, verified TLS certificate expiry/trust/hostname errors, mixed-content references, common security headers, and `Secure`/`HttpOnly`/`SameSite` cookie attributes.
@@ -22,8 +25,8 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Passive technology and edge-product clues based on observed response headers, cookie names, and a bounded HTML sample. Fingerprints are clues, not confirmation of a WAF or product.
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
-- Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target.
-- Native save dialogs for JSON reports and port CSV exports.
+- Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
+- Native save dialogs for JSON, HTML/Markdown Web Audit summary reports (grade, risk score, findings, remediation), port CSV exports, and history JSON export links. History supports search/filter, per-entry delete, and clear-all with confirmation. Web Audit and port scans can be compared against the previous stored snapshot for the same target. Web Audit and Path Fuzzer support configurable request delay (ms) for rate limiting. Port scanner includes quick presets (Top 100, Top 1000, Web Ports range, 1-1024). Developed by [H!D3-C4rD](https://arkaryan.net/).
 - Cross-platform desktop UI powered by Wails.
 
 ## How it works

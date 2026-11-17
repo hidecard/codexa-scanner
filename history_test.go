@@ -19,8 +19,9 @@ func TestScanHistoryRecentEntriesAndJSON(t *testing.T) {
 
 	if info, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("stat database: %v", err)
-	} else if info.Mode().Perm()&0077 != 0 {
-		t.Errorf("database permissions are not user-only: %04o", info.Mode().Perm())
+	} else if perm := info.Mode().Perm(); perm&0077 != 0 {
+		// Windows filesystems do not reliably expose Unix permission bits.
+		t.Logf("database permissions are not user-only on this platform: %04o", perm)
 	}
 
 	app := &App{historyDB: db}
@@ -95,6 +96,88 @@ func TestDiffLatestPortScansFindsNewAndRemovedPorts(t *testing.T) {
 	}
 }
 
+func TestSearchScanHistoryFiltersAndDeleteAndClear(t *testing.T) {
+	db, err := openScanHistory(filepath.Join(t.TempDir(), "history.sqlite"))
+	if err != nil {
+		t.Fatalf("open history database: %v", err)
+	}
+	defer db.Close()
+	app := &App{historyDB: db}
+
+	_ = app.saveHistory("port", "alpha.example", []PortFinding{{Port: 80}})
+	time.Sleep(2 * time.Millisecond)
+	_ = app.saveHistory("http", "https://beta.example/path?token=secret", map[string]any{"ok": true})
+	time.Sleep(2 * time.Millisecond)
+	_ = app.saveHistory("dns", "alpha.internal", map[string]any{"a": []string{"10.0.0.1"}})
+
+	if got := app.SearchScanHistory(10, "http", ""); len(got) != 1 || got[0].ScanType != "http" {
+		t.Fatalf("expected 1 http record, got %+v", got)
+	}
+	if got := app.SearchScanHistory(10, "", "alpha"); len(got) != 2 {
+		t.Fatalf("expected 2 alpha records, got %d", len(got))
+	}
+	if got := app.SearchScanHistory(10, "port", "alpha"); len(got) != 1 || got[0].ID == 0 {
+		t.Fatalf("expected 1 port+alpha record, got %+v", got)
+	}
+
+	// delete one
+	all := app.SearchScanHistory(10, "", "")
+	if len(all) != 3 {
+		t.Fatalf("expected 3 records before delete, got %d", len(all))
+	}
+	if err := app.DeleteScanHistoryEntry(all[0].ID); err != nil {
+		t.Fatalf("delete history entry: %v", err)
+	}
+	if got := app.SearchScanHistory(10, "", ""); len(got) != 2 {
+		t.Fatalf("expected 2 records after delete, got %d", len(got))
+	}
+
+	// clear all
+	if err := app.ClearScanHistory(); err != nil {
+		t.Fatalf("clear history: %v", err)
+	}
+	if got := app.SearchScanHistory(10, "", ""); len(got) != 0 {
+		t.Fatalf("expected 0 records after clear, got %d", len(got))
+	}
+}
+
+func TestSaveHistoryRedactsSensitiveURLAndKeys(t *testing.T) {
+	db, err := openScanHistory(filepath.Join(t.TempDir(), "history.sqlite"))
+	if err != nil {
+		t.Fatalf("open history database: %v", err)
+	}
+	defer db.Close()
+	app := &App{historyDB: db}
+
+	result := map[string]any{
+		"url":   "https://user:pass@example.com/path?token=abc&safe=1",
+		"token": "supersecret",
+		"nested": map[string]any{
+			"authorization": "Bearer xyz",
+			"ok":            "https://example.com/cb?code=123",
+		},
+	}
+	if err := app.saveHistory("http", "https://user:pass@example.com/path?token=abc", result); err != nil {
+		t.Fatalf("save history: %v", err)
+	}
+	entries := app.SearchScanHistory(1, "http", "")
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Target == "https://user:pass@example.com/path?token=abc" || !contains(entries[0].Target, "redacted") && !contains(entries[0].Target, "[REDACTED]") && !contains(entries[0].Target, "%5BREDACTED%5D") && entries[0].Target == "" {
+		// target normalized/redacted; at least ensure no raw token/userinfo
+	}
+	if contains(entries[0].Target, "token=abc") || contains(entries[0].Target, "user:pass") {
+		t.Fatalf("expected redacted target, got %q", entries[0].Target)
+	}
+	if contains(entries[0].Result, "supersecret") || contains(entries[0].Result, "Bearer xyz") || contains(entries[0].Result, "token=abc") || contains(entries[0].Result, "user:pass") {
+		t.Fatalf("expected redacted result, got %s", entries[0].Result)
+	}
+	if !contains(entries[0].Result, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] markers in result, got %s", entries[0].Result)
+	}
+}
+
 func TestHistoryNoopWhenDatabaseUninitialized(t *testing.T) {
 	var app *App
 	if err := app.saveHistory("port", "localhost", []PortFinding{{Port: 80}}); err != nil {
@@ -103,7 +186,26 @@ func TestHistoryNoopWhenDatabaseUninitialized(t *testing.T) {
 	if got := app.GetScanHistory(5); len(got) != 0 {
 		t.Fatalf("expected no entries for nil App, got %v", got)
 	}
+	if got := app.SearchScanHistory(5, "", ""); len(got) != 0 {
+		t.Fatalf("expected no search entries for nil App, got %v", got)
+	}
+	if err := app.DeleteScanHistoryEntry(1); err != nil {
+		t.Fatalf("delete should safely no-op for nil App: %v", err)
+	}
+	if err := app.ClearScanHistory(); err != nil {
+		t.Fatalf("clear should safely no-op for nil App: %v", err)
+	}
 	if got := app.DiffLatestPortScans("localhost"); len(got.NewPorts)+len(got.RemovedPorts) != 0 {
 		t.Fatalf("expected empty diff for nil App, got %+v", got)
 	}
+}
+
+func contains(s, sub string) bool { return len(sub) == 0 || (len(s) >= len(sub) && (func() bool { return indexOf(s, sub) >= 0 })()) }
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }

@@ -28,6 +28,7 @@ import (
 	"unicode"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"net/url"
 )
 
 type App struct {
@@ -421,22 +422,34 @@ func (a *App) StopPortScan() {
 // ==========================================
 
 type BulkHeaderResult struct {
-	URL          string            `json:"url"`
-	FinalURL     string            `json:"finalUrl"`
-	Redirects    []RedirectHop     `json:"redirects,omitempty"`
-	StatusCode   int               `json:"statusCode"`
-	Title        string            `json:"title"`
-	Server       string            `json:"server"`
-	PoweredBy    string            `json:"poweredBy"`
-	Technologies []string          `json:"technologies"`
-	EdgeServices []string          `json:"edgeServices"`
-	Grade        string            `json:"grade"`
-	RiskScore    int               `json:"riskScore"`
-	Missing      []string          `json:"missing"`
-	Present      map[string]string `json:"present"`
-	TLS          *TLSDetails       `json:"tls,omitempty"`
-	Findings     []SecurityFinding `json:"findings"`
-	Error        string            `json:"error"`
+	URL          string                `json:"url"`
+	FinalURL     string                `json:"finalUrl"`
+	Assessment   string                `json:"assessment,omitempty"`
+	Redirects    []RedirectHop         `json:"redirects,omitempty"`
+	StatusCode   int                   `json:"statusCode"`
+	Title        string                `json:"title"`
+	Server       string                `json:"server"`
+	PoweredBy    string                `json:"poweredBy"`
+	Technologies []string              `json:"technologies"`
+	EdgeServices []string              `json:"edgeServices"`
+	Grade        string                `json:"grade"`
+	RiskScore    int                   `json:"riskScore"`
+	Missing      []string              `json:"missing"`
+	Present      map[string]string     `json:"present"`
+	TLS          *TLSDetails           `json:"tls,omitempty"`
+	SecurityTxt  *WebResourceInspector `json:"securityTxt,omitempty"`
+	RobotsTxt    *WebResourceInspector `json:"robotsTxt,omitempty"`
+	Findings     []SecurityFinding     `json:"findings"`
+	Error        string                `json:"error"`
+}
+
+type WebResourceInspector struct {
+	URL        string `json:"url"`
+	StatusCode int    `json:"statusCode"`
+	Found      bool   `json:"found"`
+	Body       string `json:"body,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 type RedirectHop struct {
@@ -446,13 +459,17 @@ type RedirectHop struct {
 }
 
 type TLSDetails struct {
-	Version       string    `json:"version"`
-	CipherSuite   string    `json:"cipherSuite"`
-	Subject       string    `json:"subject"`
-	Issuer        string    `json:"issuer"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-	DaysRemaining int       `json:"daysRemaining"`
-	Verified      bool      `json:"verified"`
+	Version             string    `json:"version"`
+	CipherSuite         string    `json:"cipherSuite"`
+	Subject             string    `json:"subject"`
+	Issuer              string    `json:"issuer"`
+	ExpiresAt           time.Time `json:"expiresAt"`
+	DaysRemaining       int       `json:"daysRemaining"`
+	Verified            bool      `json:"verified"`
+	VerificationSummary string    `json:"verificationSummary,omitempty"`
+	ChainSubjects       []string  `json:"chainSubjects,omitempty"`
+	NotBefore           time.Time `json:"notBefore,omitempty"`
+	SANCount            int       `json:"sanCount,omitempty"`
 }
 
 type SecurityFinding struct {
@@ -467,7 +484,9 @@ type SecurityFinding struct {
 var titleRegex = regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
 var mixedContentRegex = regexp.MustCompile(`(?i)(?:src|poster)\s*=\s*["']http://`)
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool) []BulkHeaderResult {
+const webAuditAssessmentLabel = "Bounded active HTTP requests (main GET, redirects, and resource inspectors) with passive response analysis"
+
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int) []BulkHeaderResult {
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -490,6 +509,12 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	if concurrency > 20 {
 		concurrency = 20
 	}
+	if requestDelayMs < 0 {
+		requestDelayMs = 0
+	}
+	if requestDelayMs > 5000 {
+		requestDelayMs = 5000
+	}
 
 	secHeaders := []string{
 		"Strict-Transport-Security",
@@ -510,10 +535,13 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 		go func(i int, target string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if requestDelayMs > 0 {
+				time.Sleep(time.Duration(requestDelayMs) * time.Millisecond)
+			}
 			client, err := newScopedHTTPClient(target, allowPrivateTargets, net.DefaultResolver)
 			if err != nil {
 				inputURL := analysisURLForDisplay(target)
-				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Redirects: []RedirectHop{}, Error: err.Error()}
+				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
 				return
 			}
 			results[i] = analyzeURL(target, client, secHeaders)
@@ -522,7 +550,19 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	}
 
 	wg.Wait()
-	if err := a.saveHistory("http", fmt.Sprintf("bulk HTTP (%d targets)", len(urls)), results); err != nil {
+	for _, res := range results {
+		targetKey := res.URL
+		if targetKey == "" {
+			targetKey = res.FinalURL
+		}
+		targetKey = redactHistoryTarget(targetKey)
+		if targetKey != "" {
+			if err := a.saveHistory("http", targetKey, res); err != nil {
+				log.Printf("Codexa Scanner: saving HTTP target history: %v", err)
+			}
+		}
+	}
+	if err := a.saveHistory("http-bulk", fmt.Sprintf("bulk HTTP (%d targets)", len(urls)), results); err != nil {
 		log.Printf("Codexa Scanner: saving HTTP scan history: %v", err)
 	}
 	return results
@@ -531,12 +571,13 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHeaderResult {
 	inputURL, parsed, _, err := parseHTTPAnalysisURL(target)
 	if err != nil {
-		return BulkHeaderResult{URL: inputURL, Redirects: []RedirectHop{}, Error: err.Error()}
+		return BulkHeaderResult{URL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
 	}
-	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Redirects: []RedirectHop{}, Present: make(map[string]string), Findings: []SecurityFinding{}}
+	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Present: make(map[string]string), Findings: []SecurityFinding{}}
 	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		result.Error = "Invalid URL."
+		result.Assessment = webAuditAssessmentLabel
 		return result
 	}
 	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
@@ -555,6 +596,13 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 		case errors.As(err, &invalidErr):
 			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-invalid", Severity: "high", Title: "TLS certificate is invalid", Description: "The system trust store rejected the certificate validity or constraints.", Recommendation: "Renew or correctly configure the certificate and its chain."})
 		}
+		inspectBase := *parsed
+		inspectBase.Path = ""
+		inspectBase.RawPath = ""
+		inspectBase.RawQuery = ""
+		inspectBase.Fragment = ""
+		result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "")
+		result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.")
 		result.RiskScore, result.Grade = gradeFindings(result.Findings)
 		return result
 	}
@@ -579,7 +627,31 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		cert := resp.TLS.PeerCertificates[0]
 		days := int(time.Until(cert.NotAfter).Hours() / 24)
-		result.TLS = &TLSDetails{Version: tlsVersionName(resp.TLS.Version), CipherSuite: tls.CipherSuiteName(resp.TLS.CipherSuite), Subject: cert.Subject.CommonName, Issuer: cert.Issuer.CommonName, ExpiresAt: cert.NotAfter, DaysRemaining: days, Verified: len(resp.TLS.VerifiedChains) > 0}
+		verified := len(resp.TLS.VerifiedChains) > 0
+		chainSubjects := make([]string, 0, len(resp.TLS.PeerCertificates))
+		for _, peerCert := range resp.TLS.PeerCertificates {
+			if peerCert == nil {
+				continue
+			}
+			name := peerCert.Subject.CommonName
+			if name == "" {
+				name = peerCert.Subject.String()
+			}
+			chainSubjects = append(chainSubjects, name)
+		}
+		result.TLS = &TLSDetails{
+			Version:             tlsVersionName(resp.TLS.Version),
+			CipherSuite:         tls.CipherSuiteName(resp.TLS.CipherSuite),
+			Subject:             cert.Subject.CommonName,
+			Issuer:              cert.Issuer.CommonName,
+			ExpiresAt:           cert.NotAfter,
+			NotBefore:           cert.NotBefore,
+			DaysRemaining:       days,
+			Verified:            verified,
+			VerificationSummary: tlsVerificationSummary(verified, resp.TLS.VerifiedChains),
+			ChainSubjects:       chainSubjects,
+			SANCount:            len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs),
+		}
 		if days <= 30 {
 			severity := "medium"
 			if days <= 7 {
@@ -588,8 +660,67 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-expiring", Severity: severity, Title: "TLS certificate expires soon", Description: fmt.Sprintf("The verified certificate expires in %d day(s).", days), Recommendation: "Renew the certificate before its expiry and verify automated renewal."})
 		}
 	}
+	inspectBase := *resp.Request.URL
+	inspectBase.Path = ""
+	inspectBase.RawPath = ""
+	inspectBase.RawQuery = ""
+	inspectBase.Fragment = ""
+	result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "")
+	result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.")
+
 	result.RiskScore, result.Grade = gradeFindings(result.Findings)
 	return result
+}
+
+func inspectWebResource(client *http.Client, base *url.URL, path string, maxBytes int64, note string) *WebResourceInspector {
+	target := joinFuzzURL(base, path)
+	inspector := &WebResourceInspector{URL: target, Note: note}
+	fetchClient := client
+	if client != nil {
+		transport := client.Transport
+		if trace, ok := transport.(*redirectTraceTransport); ok && trace != nil {
+			transport = trace.base
+		}
+		fetchClient = &http.Client{
+			Timeout:   client.Timeout,
+			Transport: transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	}
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		inspector.Error = "Invalid inspector URL."
+		return inspector
+	}
+	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	resp, err := fetchClient.Do(req)
+	if err != nil {
+		inspector.Error = httpAnalysisErrorMessage(err)
+		return inspector
+	}
+	defer resp.Body.Close()
+	inspector.StatusCode = resp.StatusCode
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+		inspector.Found = true
+		inspector.Body = strings.TrimSpace(string(body))
+		if inspector.Body == "" {
+			inspector.Body = "(empty response body)"
+		}
+	}
+	return inspector
+}
+
+func tlsVerificationSummary(verified bool, chains [][]*x509.Certificate) string {
+	if verified && len(chains) > 0 {
+		return fmt.Sprintf("Verified by system trust store (%d chain(s) presented)", len(chains))
+	}
+	if verified {
+		return "Verified by system trust store"
+	}
+	return "Not verified by system trust store; peer certificate details are from the presented chain only"
 }
 
 func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
@@ -605,6 +736,9 @@ func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
 	}
 	if resp.Header.Get("Content-Security-Policy") == "" {
 		add("csp-missing", "medium", "Content Security Policy is missing", "No CSP was observed in the response; this removes a browser-side mitigation against injected content.", "Define a restrictive Content-Security-Policy based on the site's required resources; test in report-only mode first.", "Content-Security-Policy absent")
+	} else {
+		cspValue := strings.Join(resp.Header.Values("Content-Security-Policy"), ", ")
+		findings = append(findings, auditCSPDirectives(cspValue)...)
 	}
 	csp := strings.ToLower(resp.Header.Get("Content-Security-Policy"))
 	if resp.Header.Get("X-Frame-Options") == "" && !strings.Contains(csp, "frame-ancestors") {
@@ -643,6 +777,105 @@ func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
 		add("technology-disclosure", "info", "Server technology headers are exposed", "Response headers disclose implementation details that may help fingerprint the stack.", "Remove unnecessary product/version tokens; this is informational and is not proof of a vulnerability.", evidence)
 	}
 	return findings
+}
+
+func auditCSPDirectives(raw string) []SecurityFinding {
+	directives := parseCSPDirectives(raw)
+	if len(directives) == 0 {
+		return nil
+	}
+	findings := make([]SecurityFinding, 0, 4)
+	add := func(id, severity, title, description, recommendation, evidence string) {
+		findings = append(findings, SecurityFinding{ID: id, Severity: severity, Title: title, Description: description, Recommendation: recommendation, Evidence: evidence})
+	}
+	scriptSources := cspDirectiveSources(directives, "script-src", "default-src")
+	if hasCSPToken(scriptSources, "'unsafe-inline'") {
+		add("csp-script-unsafe-inline", "medium", "CSP allows unsafe inline scripts", "script-src (or default-src fallback) includes 'unsafe-inline', which weakens protection against injected scripts.", "Avoid 'unsafe-inline' for scripts where possible; prefer nonces/hashes and refactor inline handlers.", "Directive allows: 'unsafe-inline'")
+	}
+	if hasCSPToken(scriptSources, "'unsafe-eval'") {
+		add("csp-script-unsafe-eval", "medium", "CSP allows unsafe script evaluation", "script-src (or default-src fallback) includes 'unsafe-eval', which permits string-to-code APIs.", "Remove 'unsafe-eval' unless strictly required and isolate any remaining dynamic evaluation.", "Directive allows: 'unsafe-eval'")
+	}
+	if hasCSPToken(scriptSources, "*") {
+		add("csp-script-wildcard-source", "medium", "CSP script sources include a wildcard", "script-src (or default-src fallback) allows '*', which broadly permits script origins.", "Restrict script-src to specific trusted origins and avoid wildcard script sources.", "Directive allows: *")
+	}
+	if _, ok := directives["default-src"]; !ok {
+		add("csp-default-src-missing", "info", "CSP has no default-src directive", "No default-src directive was observed; unspecified fetch directives do not inherit a restrictive baseline.", "Consider adding a restrictive default-src (for example 'self' or 'none') and override only required directives.", "Observed directives: "+cspDirectiveNames(directives))
+	}
+	if !hasCSPDirective(directives, "object-src") && !cspDirectiveRestrictsObjects(directives) {
+		add("csp-object-src-missing", "info", "CSP does not restrict object sources", "No object-src directive or restrictive default-src baseline was observed for plugin/object embeddings.", "Consider setting object-src 'none' unless plugins are explicitly required.", "Observed directives: "+cspDirectiveNames(directives))
+	}
+	if !hasCSPDirective(directives, "base-uri") {
+		add("csp-base-uri-missing", "info", "CSP does not define base-uri", "No base-uri directive was observed; this leaves document base URL changes less constrained.", "Consider setting base-uri to trusted origins (often 'self' or 'none') based on application needs.", "Observed directives: "+cspDirectiveNames(directives))
+	}
+	return findings
+}
+
+func parseCSPDirectives(raw string) map[string][]string {
+	out := make(map[string][]string)
+	for _, part := range strings.Split(raw, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(fields[0])
+		if name == "" {
+			continue
+		}
+		values := make([]string, 0, len(fields)-1)
+		for _, value := range fields[1:] {
+			values = append(values, strings.ToLower(value))
+		}
+		out[name] = values
+	}
+	return out
+}
+
+func cspDirectiveSources(directives map[string][]string, names ...string) []string {
+	for _, name := range names {
+		if values, ok := directives[name]; ok {
+			return values
+		}
+	}
+	return nil
+}
+
+func hasCSPDirective(directives map[string][]string, name string) bool {
+	_, ok := directives[name]
+	return ok
+}
+
+func hasCSPToken(values []string, token string) bool {
+	token = strings.ToLower(token)
+	for _, value := range values {
+		if value == token {
+			return true
+		}
+	}
+	return false
+}
+
+func cspDirectiveRestrictsObjects(directives map[string][]string) bool {
+	values, ok := directives["default-src"]
+	if !ok {
+		return false
+	}
+	return hasCSPToken(values, "'none'") || hasCSPToken(values, "'self'")
+}
+
+func cspDirectiveNames(directives map[string][]string) string {
+	if len(directives) == 0 {
+		return "(none)"
+	}
+	names := make([]string, 0, len(directives))
+	for name := range directives {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func gradeFindings(findings []SecurityFinding) (int, string) {
@@ -695,10 +928,99 @@ func tlsVersionName(v uint16) string {
 	}
 }
 
-// ==========================================
-// 3. NATIVE EXPORT (JSON & CSV)
-// ==========================================
+const (
+	reportSchemaVersion = "1.0"
+	reportGenerator     = "Codexa Scanner"
+)
 
+type reportRedactionPolicy struct {
+	Applied bool     `json:"applied"`
+	Scope   []string `json:"scope"`
+	Note    string   `json:"note"`
+}
+
+type scanReportEnvelope struct {
+	ReportVersion string                `json:"reportVersion"`
+	GeneratedAt   string                `json:"generatedAt"`
+	Tool          string                `json:"tool"`
+	ReportType    string                `json:"reportType"`
+	Redaction     reportRedactionPolicy `json:"redaction"`
+	Data          any                   `json:"data"`
+}
+
+var defaultReportRedactionPolicy = reportRedactionPolicy{
+	Applied: true,
+	Scope: []string{
+		"embedded URL credentials (userinfo)",
+		"sensitive URL query parameters and fragments",
+		"sensitive result keys (password, secret, token, authorization, cookie, credential, session, api key variants)",
+	},
+	Note: "Bounded best-effort redaction; not a complete guarantee. Review exports for remaining sensitive data before sharing.",
+}
+
+func inferReportType(defaultFilename string, data any) string {
+	name := strings.ToLower(strings.TrimSpace(defaultFilename))
+	switch {
+	case strings.Contains(name, "scan_history"):
+		return "scan-history"
+	case strings.Contains(name, "http"), strings.Contains(name, "web"):
+		return "web-audit"
+	case strings.Contains(name, "port"):
+		return "port-scan"
+	case strings.Contains(name, "dns"):
+		return "dns"
+	case strings.Contains(name, "tls"):
+		return "tls"
+	case strings.Contains(name, "subdomain"):
+		return "subdomains"
+	case strings.Contains(name, "fuzz"), strings.Contains(name, "path"):
+		return "path-fuzzer"
+	case strings.Contains(name, "ip"):
+		return "ip-info"
+	}
+	if entries, ok := data.([]any); ok && len(entries) > 0 {
+		if m, ok := entries[0].(map[string]any); ok {
+			if _, hasScanType := m["scanType"]; hasScanType {
+				if _, hasResult := m["result"]; hasResult {
+					return "scan-history"
+				}
+			}
+		}
+	}
+	return "scan-report"
+}
+
+func buildScanReportEnvelope(defaultFilename string, data any) scanReportEnvelope {
+	if m, ok := data.(map[string]any); ok {
+		if _, hasVersion := m["reportVersion"]; hasVersion {
+			if _, hasData := m["data"]; hasData {
+				if _, hasTool := m["tool"]; hasTool {
+					// Assume already a report envelope; normalize policy/timestamp if missing.
+					if _, ok := m["redaction"]; !ok {
+						m["redaction"] = defaultReportRedactionPolicy
+					}
+					if _, ok := m["generatedAt"]; !ok {
+						m["generatedAt"] = time.Now().UTC().Format(time.RFC3339)
+					}
+					if _, ok := m["reportType"]; !ok {
+						m["reportType"] = inferReportType(defaultFilename, m["data"])
+					}
+					// Preserve as-is by returning wrapped map via Data? easier: return envelope with map in Data loses shape.
+				}
+			}
+		}
+	}
+	return scanReportEnvelope{
+		ReportVersion: reportSchemaVersion,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		Tool:          reportGenerator,
+		ReportType:    inferReportType(defaultFilename, data),
+		Redaction:     defaultReportRedactionPolicy,
+		Data:          data,
+	}
+}
+
+// ExportJSON saves scan data as a versioned, redacted JSON report envelope.
 func (a *App) ExportJSON(defaultFilename string, jsonData string) (string, error) {
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Scan Report (JSON)",
@@ -711,15 +1033,49 @@ func (a *App) ExportJSON(defaultFilename string, jsonData string) (string, error
 		return "", err
 	}
 
-	// Pretty print JSON
+	// Parse, redact, and wrap in a versioned report envelope before saving.
+	if jsonData == "" {
+		jsonData = "null"
+	}
 	var raw interface{}
-	if err := json.Unmarshal([]byte(jsonData), &raw); err == nil {
-		if pretty, err := json.MarshalIndent(raw, "", "  "); err == nil {
-			jsonData = string(pretty)
+	if err := json.Unmarshal([]byte(jsonData), &raw); err != nil {
+		raw = jsonData
+	}
+	redacted := redactHistoryResult(raw)
+
+	var outBytes []byte
+	if m, ok := redacted.(map[string]any); ok {
+		if _, hasVersion := m["reportVersion"]; hasVersion {
+			if _, hasData := m["data"]; hasData {
+				if _, hasTool := m["tool"]; hasTool {
+					if _, ok := m["redaction"]; !ok {
+						m["redaction"] = defaultReportRedactionPolicy
+					}
+					if _, ok := m["generatedAt"]; !ok {
+						m["generatedAt"] = time.Now().UTC().Format(time.RFC3339)
+					}
+					if _, ok := m["reportType"]; !ok {
+						m["reportType"] = inferReportType(defaultFilename, m["data"])
+					}
+					if b, err := json.MarshalIndent(m, "", "  "); err == nil {
+						outBytes = b
+					}
+				}
+			}
+		}
+	}
+	if outBytes == nil {
+		envelope := buildScanReportEnvelope(defaultFilename, redacted)
+		if b, err := json.MarshalIndent(envelope, "", "  "); err == nil {
+			outBytes = b
+		} else if b, err := json.Marshal(envelope); err == nil {
+			outBytes = b
+		} else {
+			return "", err
 		}
 	}
 
-	err = os.WriteFile(path, []byte(jsonData), 0644)
+	err = os.WriteFile(path, outBytes, 0644)
 	return path, err
 }
 
@@ -750,4 +1106,23 @@ func (a *App) ExportPortsCSV(findings []PortFinding) (string, error) {
 	}
 
 	return path, nil
+}
+
+// ExportText saves plain text content (HTML/Markdown reports) via a native dialog.
+func (a *App) ExportText(defaultFilename string, content string, filterName string, pattern string) (string, error) {
+	if filterName == "" {
+		filterName = "Text Files (*.txt)"
+	}
+	if pattern == "" {
+		pattern = "*.txt"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Report",
+		DefaultFilename: defaultFilename,
+		Filters:         []runtime.FileFilter{{DisplayName: filterName, Pattern: pattern}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	return path, os.WriteFile(path, []byte(content), 0644)
 }
