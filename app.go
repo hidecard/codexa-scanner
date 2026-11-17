@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"bufio"
@@ -120,7 +120,7 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
 
-	// HTTP/HTTPS port ဖြစ်နေရင် HEAD request လှမ်းပို့ပြီး Server header ယူမယ်
+	// HTTP/HTTPS port á€–á€¼á€…á€ºá€”á€±á€›á€„á€º HEAD request á€œá€¾á€™á€ºá€¸á€•á€­á€¯á€·á€•á€¼á€®á€¸ Server header á€šá€°á€™á€šá€º
 	if port == 80 || port == 8080 || port == 8000 {
 		fmt.Fprintf(conn, "HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", target)
 	}
@@ -132,7 +132,7 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 	}
 
 	raw := string(buf[:n])
-	// HTTP response ဖြစ်ရင် Server header ကိုပဲ သန့်သန့်လေး ဆွဲထုတ်မယ်
+	// HTTP response á€–á€¼á€…á€ºá€›á€„á€º Server header á€€á€­á€¯á€•á€² á€žá€”á€·á€ºá€žá€”á€·á€ºá€œá€±á€¸ á€†á€½á€²á€‘á€¯á€á€ºá€™á€šá€º
 	if strings.HasPrefix(raw, "HTTP/") {
 		for _, line := range strings.Split(raw, "\r\n") {
 			if strings.HasPrefix(strings.ToLower(line), "server:") {
@@ -142,7 +142,7 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 		return strings.Split(raw, "\r\n")[0]
 	}
 
-	// တခြား Banner တွေ (SSH, FTP, SMTP) အတွက် ပထမဆုံးစာကြောင်းကို ယူမယ်
+	// á€á€á€¼á€¬á€¸ Banner á€á€½á€± (SSH, FTP, SMTP) á€¡á€á€½á€€á€º á€•á€‘á€™á€†á€¯á€¶á€¸á€…á€¬á€€á€¼á€±á€¬á€„á€ºá€¸á€€á€­á€¯ á€šá€°á€™á€šá€º
 	clean := strings.TrimSpace(strings.Split(raw, "\n")[0])
 	if len(clean) > 80 {
 		clean = clean[:80] + "..."
@@ -425,25 +425,26 @@ func (a *App) StopPortScan() {
 // ==========================================
 
 type BulkHeaderResult struct {
-	URL          string                `json:"url"`
-	FinalURL     string                `json:"finalUrl"`
-	Assessment   string                `json:"assessment,omitempty"`
-	Redirects    []RedirectHop         `json:"redirects,omitempty"`
-	StatusCode   int                   `json:"statusCode"`
-	Title        string                `json:"title"`
-	Server       string                `json:"server"`
-	PoweredBy    string                `json:"poweredBy"`
-	Technologies []string              `json:"technologies"`
-	EdgeServices []string              `json:"edgeServices"`
-	Grade        string                `json:"grade"`
-	RiskScore    int                   `json:"riskScore"`
-	Missing      []string              `json:"missing"`
-	Present      map[string]string     `json:"present"`
-	TLS          *TLSDetails           `json:"tls,omitempty"`
-	SecurityTxt  *WebResourceInspector `json:"securityTxt,omitempty"`
-	RobotsTxt    *WebResourceInspector `json:"robotsTxt,omitempty"`
-	Findings     []SecurityFinding     `json:"findings"`
-	Error        string                `json:"error"`
+	URL             string                `json:"url"`
+	FinalURL        string                `json:"finalUrl"`
+	Assessment      string                `json:"assessment,omitempty"`
+	Redirects       []RedirectHop         `json:"redirects,omitempty"`
+	StatusCode      int                   `json:"statusCode"`
+	Title           string                `json:"title"`
+	Server          string                `json:"server"`
+	PoweredBy       string                `json:"poweredBy"`
+	Technologies    []string              `json:"technologies"`
+	EdgeServices    []string              `json:"edgeServices"`
+	Grade           string                `json:"grade"`
+	RiskScore       int                   `json:"riskScore"`
+	Missing         []string              `json:"missing"`
+	Present         map[string]string     `json:"present"`
+	TLS             *TLSDetails           `json:"tls,omitempty"`
+	SecurityTxt     *WebResourceInspector `json:"securityTxt,omitempty"`
+	RobotsTxt       *WebResourceInspector `json:"robotsTxt,omitempty"`
+	ClientSideAudit *ClientSideAudit      `json:"clientSideAudit,omitempty"`
+	Findings        []SecurityFinding     `json:"findings"`
+	Error           string                `json:"error"`
 }
 
 type WebResourceInspector struct {
@@ -453,6 +454,31 @@ type WebResourceInspector struct {
 	Body       string `json:"body,omitempty"`
 	Error      string `json:"error,omitempty"`
 	Note       string `json:"note,omitempty"`
+}
+
+// ClientSideClue captures bounded, redacted client-side exposure indicators.
+type ClientSideClue struct {
+	Kind       string `json:"kind"`
+	Value      string `json:"value,omitempty"`
+	Context    string `json:"context,omitempty"`
+	ScriptURL  string `json:"scriptUrl,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Note       string `json:"note,omitempty"`
+	Reachable  *bool  `json:"reachable,omitempty"`
+	StatusCode int    `json:"statusCode,omitempty"`
+}
+
+// ClientSideAudit summarizes bounded passive JS/bundle and parameter reflection checks.
+type ClientSideAudit struct {
+	ScriptsFetched      int              `json:"scriptsFetched"`
+	ScriptsScanned      int              `json:"scriptsScanned"`
+	Truncated           bool             `json:"truncated,omitempty"`
+	SecretFindings      []ClientSideClue `json:"secretFindings,omitempty"`
+	SourceMapClues      []ClientSideClue `json:"sourceMapClues,omitempty"`
+	EndpointClues       []ClientSideClue `json:"endpointClues,omitempty"`
+	DOMSinks            []ClientSideClue `json:"domSinks,omitempty"`
+	ReflectedParamProbe *ClientSideClue  `json:"reflectedParamProbe,omitempty"`
+	Notes               []string         `json:"notes,omitempty"`
 }
 
 type RedirectHop struct {
@@ -486,8 +512,18 @@ type SecurityFinding struct {
 
 var titleRegex = regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
 var mixedContentRegex = regexp.MustCompile(`(?i)(?:src|poster)\s*=\s*["']http://`)
+var scriptSrcRegex = regexp.MustCompile(`(?is)<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>`)
+var sourceMapRegex = regexp.MustCompile(`(?m)//[#@]\s*sourceMappingURL\s*=\s*(\S+)`)
+var domSinkRegex = regexp.MustCompile(`\b(dangerouslySetInnerHTML|innerHTML|outerHTML|document\.write|eval)\b`)
+var apiPathRegex = regexp.MustCompile(`(?i)(?:^|["'\(\s])(/(?:api|v1|v2|v3|trpc|graphql)(?:/[A-Za-z0-9._~\-/%]*)?)`)
+var baasHostRegex = regexp.MustCompile(`(?i)\b([a-z0-9-]+\.supabase\.co|[a-z0-9-]+\.firebaseio\.com|[a-z0-9.-]+\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com|s3\.amazonaws\.com/[a-z0-9.\-]+)\b`)
 
-const webAuditAssessmentLabel = "Bounded active HTTP requests (main GET, redirects, and resource inspectors) with passive response analysis"
+const (
+	webAuditAssessmentLabel       = "Bounded active HTTP requests (main GET, redirects, resource inspectors, and optional bounded client-side probes) with passive response analysis"
+	maxClientScripts              = 5
+	maxClientScriptBytes    int64 = 512 * 1024
+	reflectedProbeMarker          = "codexa_probe_123"
+)
 
 func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int) []BulkHeaderResult {
 	var urls []string
@@ -584,6 +620,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 		return result
 	}
 	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	req.Header.Set("Origin", "https://probe.codexa.invalid")
 	resp, err := client.Do(req)
 	result.Redirects = snapshotRedirectHops(client)
 	if err != nil {
@@ -671,8 +708,422 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "")
 	result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.")
 
+	clientSide, csFindings := auditClientSideExposure(client, resp.Request.URL, bodyBytes, result.Findings)
+	if clientSide != nil {
+		result.ClientSideAudit = clientSide
+	}
+	if len(csFindings) > 0 {
+		result.Findings = append(result.Findings, csFindings...)
+	}
+
 	result.RiskScore, result.Grade = gradeFindings(result.Findings)
 	return result
+}
+
+func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte, existing []SecurityFinding) (*ClientSideAudit, []SecurityFinding) {
+	if client == nil || pageURL == nil || len(body) == 0 {
+		return nil, nil
+	}
+	audit := &ClientSideAudit{}
+	findings := make([]SecurityFinding, 0, 8)
+
+	if probe := probeReflectedParameter(client, pageURL, existing); probe != nil {
+		audit.ReflectedParamProbe = probe
+		if probe.Kind == "reflected" {
+			findings = append(findings, SecurityFinding{
+				ID:             "reflected-parameter-clue",
+				Severity:       "info",
+				Title:          "Harmless reflected parameter indicator (passive)",
+				Description:    "A benign alphanumeric marker appended to an existing query parameter was echoed unencoded in the sampled HTML response. This is a passive reflection clue, not proof of exploitability. Review alongside CSP script restrictions and cookie HttpOnly posture.",
+				Recommendation: "Contextually encode user-controlled parameter values on output and review input handling in authorized context; combine with restrictive CSP and appropriate cookie protections.",
+				Evidence:       "Benign marker reflected in sampled response body (marker not stored as secret evidence)",
+			})
+		}
+	}
+
+	scriptURLs := extractFirstPartyScriptURLs(pageURL, body, maxClientScripts)
+	audit.ScriptsFetched = len(scriptURLs)
+	if len(scriptURLs) == 0 {
+		return audit, findings
+	}
+	seenSecrets := map[string]bool{}
+	seenEndpoints := map[string]bool{}
+	seenSinks := map[string]bool{}
+	seenMaps := map[string]bool{}
+
+	for _, scriptURL := range scriptURLs {
+		content, ok := fetchBoundedTextResource(client, scriptURL, maxClientScriptBytes)
+		if !ok {
+			audit.Notes = append(audit.Notes, "Could not fetch bounded script: "+truncateForPDF(scriptURL, 120))
+			continue
+		}
+		audit.ScriptsScanned++
+
+		for _, clue := range scanScriptSecrets(scriptURL, content) {
+			key := clue.Kind + "|" + clue.ScriptURL + "|" + clue.Value
+			if seenSecrets[key] {
+				continue
+			}
+			seenSecrets[key] = true
+			audit.SecretFindings = append(audit.SecretFindings, clue)
+			findings = append(findings, SecurityFinding{
+				ID:             "client-secret-pattern-" + sanitizeIDFragment(clue.Kind),
+				Severity:       "high",
+				Title:          "Possible client-side secret/token pattern in script (passive, redacted)",
+				Description:    "A bounded passive scan found text matching a common credential/token pattern in a fetched first-party script. Pattern/entropy heuristics may produce false positives.",
+				Recommendation: "If real, rotate exposed credentials immediately, remove secrets from client-side bundles, and use server-side proxies or scoped public tokens.",
+				Evidence:       fmt.Sprintf("%s in %s: %s", clue.Kind, truncateForPDF(clue.ScriptURL, 100), clue.Value),
+			})
+		}
+
+		if mapClue := detectSourceMap(client, pageURL, scriptURL, content); mapClue != nil {
+			mkey := mapClue.ScriptURL + "|" + mapClue.Value
+			if !seenMaps[mkey] {
+				seenMaps[mkey] = true
+				audit.SourceMapClues = append(audit.SourceMapClues, *mapClue)
+				if mapClue.Reachable != nil && *mapClue.Reachable {
+					findings = append(findings, SecurityFinding{
+						ID:             "source-map-reachable",
+						Severity:       "medium",
+						Title:          "Publicly reachable source map clue",
+						Description:    "A fetched script references a source map and a bounded same-origin HEAD request indicates the map URL is reachable. Source maps can expose original source and implementation details.",
+						Recommendation: "Remove production source maps from public access or restrict access if not required.",
+						Evidence:       fmt.Sprintf("Script %s references %s (HEAD status %d)", truncateForPDF(mapClue.ScriptURL, 90), truncateForPDF(mapClue.Value, 90), mapClue.StatusCode),
+					})
+				}
+			}
+		}
+
+		for _, clue := range extractEndpointClues(pageURL, scriptURL, content) {
+			key := clue.Kind + "|" + clue.Value
+			if seenEndpoints[key] {
+				continue
+			}
+			seenEndpoints[key] = true
+			audit.EndpointClues = append(audit.EndpointClues, clue)
+		}
+
+		for _, clue := range scanDOMSinks(scriptURL, content) {
+			key := clue.Kind + "|" + clue.ScriptURL + "|" + strconv.Itoa(clue.Line)
+			if seenSinks[key] {
+				continue
+			}
+			seenSinks[key] = true
+			audit.DOMSinks = append(audit.DOMSinks, clue)
+		}
+	}
+
+	if len(audit.EndpointClues) > 0 {
+		findings = append(findings, SecurityFinding{
+			ID:             "client-endpoint-clues",
+			Severity:       "info",
+			Title:          "Frontend API/BaaS endpoint clues discovered (passive)",
+			Description:    "Bounded parsing of fetched scripts found internal API paths or cloud/BaaS host references. Discovery clues only, not proof of exposure or vulnerability.",
+			Recommendation: "Review discovered endpoints for intended exposure, authentication, and authorization. Same-origin paths may be candidates for Web Audit or Path Discovery within authorized scope.",
+			Evidence:       fmt.Sprintf("%d unique endpoint clue(s) extracted from bounded scripts", len(audit.EndpointClues)),
+		})
+	}
+	if len(audit.DOMSinks) > 0 {
+		findings = append(findings, SecurityFinding{
+			ID:             "dom-xss-sink-clues",
+			Severity:       "info",
+			Title:          "Potential DOM XSS sink usage in client scripts (passive)",
+			Description:    "Bounded passive scanning found DOM sink APIs (e.g. innerHTML/outerHTML/document.write/eval/dangerouslySetInnerHTML) in fetched scripts. Presence is a code clue, not proof of exploitable XSS.",
+			Recommendation: "Review sink usage with untrusted data flow, prefer safe DOM APIs/text assignment, sanitize where necessary, and enforce a restrictive CSP.",
+			Evidence:       fmt.Sprintf("%d sink clue(s) with script URL/line context", len(audit.DOMSinks)),
+		})
+	}
+	if audit.ScriptsFetched >= maxClientScripts {
+		audit.Truncated = true
+		audit.Notes = append(audit.Notes, fmt.Sprintf("Script scan capped at %d first-party scripts and %d KiB each", maxClientScripts, maxClientScriptBytes/1024))
+	}
+
+	return audit, findings
+}
+
+func probeReflectedParameter(client *http.Client, pageURL *url.URL, existing []SecurityFinding) *ClientSideClue {
+	if pageURL == nil || pageURL.RawQuery == "" {
+		return nil
+	}
+	q := pageURL.Query()
+	paramName := "codexa_probe"
+	if _, exists := q[paramName]; exists {
+		paramName = "codexa_probe_check"
+	}
+	q.Set(paramName, reflectedProbeMarker)
+	probeURL := *pageURL
+	probeURL.RawQuery = q.Encode()
+	req, err := http.NewRequest(http.MethodGet, probeURL.String(), nil)
+	if err != nil {
+		return &ClientSideClue{Kind: "skipped", Note: "Could not build reflected-parameter probe request"}
+	}
+	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return &ClientSideClue{Kind: "skipped", Note: "Reflected-parameter probe request failed"}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	clue := &ClientSideClue{Kind: "not-reflected", StatusCode: resp.StatusCode, Note: "Benign marker not observed unencoded in sampled response body"}
+	if bytes.Contains(body, []byte(reflectedProbeMarker)) {
+		clue.Kind = "reflected"
+		clue.Value = "Marker reflected (value redacted)"
+		posture := []string{}
+		for _, f := range existing {
+			id := strings.ToLower(f.ID)
+			if strings.Contains(id, "csp") || strings.Contains(id, "cookie-httponly") {
+				posture = append(posture, f.ID)
+			}
+		}
+		if len(posture) > 0 {
+			clue.Context = "Observed posture clues: " + strings.Join(posture, ", ")
+		}
+	}
+	return clue
+}
+
+func extractFirstPartyScriptURLs(pageURL *url.URL, body []byte, limit int) []string {
+	if pageURL == nil || len(body) == 0 || limit <= 0 {
+		return nil
+	}
+	matches := scriptSrcRegex.FindAllSubmatch(body, -1)
+	seen := map[string]bool{}
+	out := make([]string, 0, limit)
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		raw := strings.TrimSpace(string(m[1]))
+		if raw == "" {
+			continue
+		}
+		lr := strings.ToLower(raw)
+		if strings.HasPrefix(lr, "data:") || strings.HasPrefix(lr, "javascript:") || strings.HasPrefix(lr, "blob:") {
+			continue
+		}
+		ref, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		abs := pageURL.ResolveReference(ref)
+		if !strings.EqualFold(abs.Scheme, "http") && !strings.EqualFold(abs.Scheme, "https") {
+			continue
+		}
+		if !strings.EqualFold(abs.Hostname(), pageURL.Hostname()) {
+			continue
+		}
+		abs.Fragment = ""
+		u := abs.String()
+		if seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func fetchBoundedTextResource(client *http.Client, target string, maxBytes int64) (string, bool) {
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", false
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil && len(b) == 0 {
+		return "", false
+	}
+	return string(b), true
+}
+
+func redactSecretPreview(s string) string {
+	if len(s) <= 8 {
+		return "[REDACTED]"
+	}
+	return s[:4] + "****" + s[len(s)-4:]
+}
+
+func scanScriptSecrets(scriptURL, content string) []ClientSideClue {
+	patterns := []struct {
+		kind string
+		re   *regexp.Regexp
+	}{
+		{"openai-like-key", regexp.MustCompile(`\bsk-(?:proj-)[A-Za-z0-9_-]{16,}\b|\bsk-[A-Za-z0-9]{20,}\b`)},
+		{"stripe-live-key", regexp.MustCompile(`\bsk_live_[A-Za-z0-9]{16,}\b`)},
+		{"google-api-key", regexp.MustCompile(`\bAIza[0-9A-Za-z\-_]{20,}\b`)},
+		{"aws-access-key-id", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
+		{"github-token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`)},
+		{"supabase-service-role-clue", regexp.MustCompile(`(?i)service_role.{0,20}eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
+	}
+	seen := map[string]bool{}
+	clues := make([]ClientSideClue, 0, 4)
+	for _, p := range patterns {
+		ms := p.re.FindAllString(content, 3)
+		for _, m := range ms {
+			key := p.kind + "|" + m
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			clues = append(clues, ClientSideClue{Kind: p.kind, Value: redactSecretPreview(m), ScriptURL: scriptURL, Note: "Pattern/heuristic match (passive, redacted preview)"})
+		}
+	}
+	return clues
+}
+
+func detectSourceMap(client *http.Client, pageURL *url.URL, scriptURL, content string) *ClientSideClue {
+	m := sourceMapRegex.FindStringSubmatch(content)
+	if len(m) < 2 {
+		return nil
+	}
+	raw := strings.TrimSpace(m[1])
+	if raw == "" || strings.HasPrefix(strings.ToLower(raw), "data:") {
+		return &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: "(inline/data source map reference)", Note: "Inline source map reference observed"}
+	}
+	base, err := url.Parse(scriptURL)
+	if err != nil {
+		base = pageURL
+	}
+	ref, err := url.Parse(raw)
+	if err != nil {
+		return &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: truncateForPDF(raw, 120), Note: "Source map directive found but URL could not be resolved"}
+	}
+	abs := base.ResolveReference(ref)
+	if abs == nil || !strings.EqualFold(abs.Hostname(), pageURL.Hostname()) {
+		if abs != nil {
+			return &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: truncateForPDF(abs.String(), 120), Note: "Cross-origin source map reference ignored (not probed)"}
+		}
+		return &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: truncateForPDF(raw, 120), Note: "Source map reference could not be resolved"}
+	}
+	clue := &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: abs.String(), Note: "Bounded same-origin HEAD check performed"}
+	reachable, status := headReachable(client, abs.String())
+	clue.Reachable = &reachable
+	clue.StatusCode = status
+	return clue
+}
+
+func headReachable(client *http.Client, target string) (bool, int) {
+	req, err := http.NewRequest(http.MethodHead, target, nil)
+	if err != nil {
+		return false, 0
+	}
+	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, 0
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	return resp.StatusCode >= 200 && resp.StatusCode < 400, resp.StatusCode
+}
+
+func extractEndpointClues(pageURL *url.URL, scriptURL, content string) []ClientSideClue {
+	out := make([]ClientSideClue, 0, 8)
+	seen := map[string]bool{}
+	for _, m := range apiPathRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		p := strings.TrimSpace(m[1])
+		if p == "" {
+			continue
+		}
+		val := p
+		kind := "api-path"
+		if pageURL != nil {
+			u := *pageURL
+			u.Path = p
+			u.RawPath = ""
+			u.RawQuery = ""
+			u.Fragment = ""
+			val = u.String()
+			kind = "same-origin-api-path"
+		}
+		key := kind + "|" + val
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, ClientSideClue{Kind: kind, Value: val, ScriptURL: scriptURL, Note: "Discovered in bounded script content; candidate for authorized review"})
+		if len(out) >= 20 {
+			return out
+		}
+	}
+	for _, m := range baasHostRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		host := strings.ToLower(strings.TrimSpace(m[1]))
+		if host == "" {
+			continue
+		}
+		key := "baas-host|" + host
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, ClientSideClue{Kind: "baas-host", Value: host, ScriptURL: scriptURL, Note: "Cloud/BaaS host reference found in bounded script content"})
+		if len(out) >= 20 {
+			break
+		}
+	}
+	return out
+}
+
+func scanDOMSinks(scriptURL, content string) []ClientSideClue {
+	lines := strings.Split(content, "\n")
+	out := make([]ClientSideClue, 0, 8)
+	seen := map[string]bool{}
+	for i, line := range lines {
+		locs := domSinkRegex.FindAllString(line, -1)
+		if len(locs) == 0 {
+			continue
+		}
+		for _, sink := range locs {
+			key := sink + "|" + strconv.Itoa(i+1)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ctx := strings.TrimSpace(line)
+			if len(ctx) > 120 {
+				ctx = ctx[:120] + "..."
+			}
+			out = append(out, ClientSideClue{Kind: "dom-sink", Value: sink, ScriptURL: scriptURL, Line: i + 1, Context: sanitizeForPDF(ctx), Note: "Passive sink usage clue; data-flow not analyzed"})
+			if len(out) >= 20 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func sanitizeIDFragment(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else if r == '_' || r == ' ' {
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "clue"
+	}
+	return out
 }
 
 func inspectWebResource(client *http.Client, base *url.URL, path string, maxBytes int64, note string) *WebResourceInspector {
@@ -779,13 +1230,13 @@ func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
 		evidence := strings.TrimSpace(resp.Header.Get("Server") + " " + resp.Header.Get("X-Powered-By"))
 		add("technology-disclosure", "info", "Server technology headers are exposed", "Response headers disclose implementation details that may help fingerprint the stack.", "Remove unnecessary product/version tokens; this is informational and is not proof of a vulnerability.", evidence)
 	}
-	findings = append(findings, auditCORSPolicy(resp)...)
+	findings = append(findings, auditCORSPolicy(resp, resp.Request)...)
 	findings = append(findings, auditDBErrorDisclosure(body)...)
 	findings = append(findings, auditJWTPayloadClues(resp)...)
 	return findings
 }
 
-func auditCORSPolicy(resp *http.Response) []SecurityFinding {
+func auditCORSPolicy(resp *http.Response, request *http.Request) []SecurityFinding {
 	if resp == nil {
 		return nil
 	}
@@ -794,7 +1245,7 @@ func auditCORSPolicy(resp *http.Response) []SecurityFinding {
 	if acao == "" {
 		return nil
 	}
-	findings := make([]SecurityFinding, 0, 2)
+	findings := make([]SecurityFinding, 0, 3)
 	if acao == "*" && acac {
 		findings = append(findings, SecurityFinding{
 			ID:             "cors-wildcard-credentials",
@@ -804,7 +1255,9 @@ func auditCORSPolicy(resp *http.Response) []SecurityFinding {
 			Recommendation: "Set a specific trusted origin for Access-Control-Allow-Origin when credentials are required, and avoid wildcard origins with credentials.",
 			Evidence:       "Access-Control-Allow-Origin: *; Access-Control-Allow-Credentials: true",
 		})
-	} else if acao == "*" {
+		return findings
+	}
+	if acao == "*" {
 		findings = append(findings, SecurityFinding{
 			ID:             "cors-wildcard-origin",
 			Severity:       "info",
@@ -812,6 +1265,28 @@ func auditCORSPolicy(resp *http.Response) []SecurityFinding {
 			Description:    "Access-Control-Allow-Origin is '*', allowing cross-origin reads from any origin for responses eligible under CORS rules.",
 			Recommendation: "Restrict allowed origins to trusted domains if the response contains non-public data or authenticated operations.",
 			Evidence:       "Access-Control-Allow-Origin: *",
+		})
+		return findings
+	}
+	reqOrigin := ""
+	if request != nil {
+		reqOrigin = strings.TrimSpace(request.Header.Get("Origin"))
+	}
+	varyHasOrigin := strings.Contains(strings.ToLower(resp.Header.Get("Vary")), "origin")
+	if reqOrigin != "" && strings.EqualFold(acao, reqOrigin) && !varyHasOrigin {
+		sev := "medium"
+		desc := "Access-Control-Allow-Origin echoes the request Origin without Vary: Origin. This can indicate unsafe origin reflection if the server does not strictly validate an allowlist."
+		if acac {
+			sev = "high"
+			desc = "Access-Control-Allow-Origin echoes the request Origin with credentials enabled and without Vary: Origin. This is a strong passive clue of unsafe CORS origin reflection."
+		}
+		findings = append(findings, SecurityFinding{
+			ID:             "cors-origin-reflection",
+			Severity:       sev,
+			Title:          "CORS origin reflection clue (passive)",
+			Description:    desc,
+			Recommendation: "Validate request origins against an explicit allowlist, return a fixed trusted origin (not arbitrary reflection), and include Vary: Origin when responses differ by origin.",
+			Evidence:       "Observed ACAO echoed request Origin; Vary did not include Origin",
 		})
 	}
 	return findings

@@ -1,5 +1,8 @@
-# Codexa Scanner
+﻿<p align="center">
+  <img src="github_readme_header.jpg" alt="Codexa Scanner" width="100%" />
+</p>
 
+# Codexa Scanner
 Desktop network reconnaissance and HTTP security-header inspection application built with Go, Wails v2, React, and TypeScript. Developed by [H!D3-C4rD](https://arkaryan.net/).
 
 > **Authorized-use notice:** Use only against systems you own or have explicit permission to assess. Port scanning and HTTP requests may be logged, trigger defensive controls, or violate policy or law when performed without authorization. Checks are passive and non-exploitative; results are indicators for review, not proof of exploitability or a substitute for a professional assessment.
@@ -16,8 +19,8 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Web Audit results and JSON exports label bounded active HTTP activity separately from passive response analysis, and HTTPS results include certificate verification summary, validity, SAN count, and presented chain subjects when available.
 - Hostnames resolve once per submitted URL; the complete DNS answer set is policy-checked and one deterministic address is pinned through the request/redirect chain. Literal IPs skip DNS. Ambient proxies are disabled so they cannot bypass address checks.
 - Private RFC1918, IPv6 ULA, and loopback targets require a default-off, one-shot opt-in for authorized lab use. Link-local, multicast, unspecified, and special-use/reserved addresses remain blocked.
-- Passive checks for HTTPS transport, verified TLS certificate expiry/trust/hostname errors, mixed-content references, common security headers, and `Secure`/`HttpOnly`/`SameSite` cookie attributes.
-- Actionable findings with severity, evidence, remediation guidance, a capped 0–100 heuristic risk score, and an A+–F grade.
+- Passive checks for HTTPS transport, verified TLS certificate expiry/trust/hostname errors, mixed-content references, common security headers, `Secure`/`HttpOnly`/`SameSite` cookie attributes, CORS/JWT posture and DB-error disclosure clues, and bounded client-side exposure indicators (redacted secret-pattern, reachable source map, endpoint/BaaS extraction, DOM sink, harmless reflected-parameter probe).
+- Actionable findings with severity, evidence, remediation guidance, a capped 0â€“100 heuristic risk score, and an A+â€“F grade.
 - Bulk analysis of up to 100 URLs with bounded concurrency and redirect depth.
 - Subdomain discovery from Certificate Transparency data, with an optional, capped DNS wordlist lookup; discovered names can be sent to the HTTP analyzer.
 - A path discovery module that uses HEAD requests only, compares status/Content-Length to a randomized missing-path baseline, and never returns response bodies.
@@ -26,7 +29,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
 - Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
-- Web Audit: bounded HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/mixed-content and CSP diagnostics, passive CORS/JWT metadata clues and sampled DB-error disclosure clues (token values redacted), security.txt/robots.txt inspectors, JSON/HTML/Markdown/PDF exports, request delay control, and per-URL snapshot diff.
+- Web Audit: bounded HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/mixed-content and CSP diagnostics, passive CORS/JWT posture clues (including origin reflection), sampled DB-error disclosure, `security.txt`/`robots.txt` inspectors, and bounded client-side exposure audit (first-party JS secret-pattern clues with redacted previews, source-map reachability HEAD checks, API/BaaS endpoint extraction, DOM sink clues, harmless reflected-parameter indicator) with JSON/HTML/Markdown/PDF exports, request delay control, and per-URL snapshot diff.
 - Path Fuzzer: HEAD-only bounded path checks with framework/env/API presets and request delay control.
 - Shared, versioned report model with bounded redaction (credentials/sensitive URL query-fragments/sensitive keys) for persistence and exports.
 - Cross-platform desktop UI powered by Wails.

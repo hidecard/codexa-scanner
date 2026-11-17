@@ -1064,6 +1064,53 @@ ${rows || '<p>No results.</p>'}
                       </div>
                     )}
 
+                    {res.clientSideAudit && (
+                      <details className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-slate-300">
+                          Client-side exposure audit (bounded passive): {res.clientSideAudit.scriptsScanned}/{res.clientSideAudit.scriptsFetched} scripts scanned
+                          {res.clientSideAudit.truncated ? ' · capped' : ''}
+                        </summary>
+                        <div className="mt-2 space-y-3 text-xs text-slate-300">
+                          {res.clientSideAudit.notes?.length ? <ul className="list-disc pl-4 text-[11px] text-slate-400">{res.clientSideAudit.notes.map((n, i) => <li key={i}>{n}</li>)}</ul> : null}
+                          {res.clientSideAudit.reflectedParamProbe && (
+                            <div className="rounded border border-slate-800 bg-slate-900 p-2">
+                              <div className="font-semibold text-slate-200">Reflected parameter probe (harmless, passive)</div>
+                              <div className="text-[11px] text-slate-400">Result: {res.clientSideAudit.reflectedParamProbe.kind}{res.clientSideAudit.reflectedParamProbe.statusCode ? ` (HTTP ${res.clientSideAudit.reflectedParamProbe.statusCode})` : ''}</div>
+                              {res.clientSideAudit.reflectedParamProbe.note && <div className="text-[11px] text-slate-400">{res.clientSideAudit.reflectedParamProbe.note}</div>}
+                              {res.clientSideAudit.reflectedParamProbe.context && <div className="text-[11px] text-amber-300">{res.clientSideAudit.reflectedParamProbe.context}</div>}
+                            </div>
+                          )}
+                          {res.clientSideAudit.secretFindings?.length ? (
+                            <div>
+                              <div className="font-semibold text-rose-300">Secret/token pattern clues (redacted)</div>
+                              <div className="mt-1 space-y-1">{res.clientSideAudit.secretFindings.map((c, i) => <div key={i} className="break-all rounded bg-slate-900 p-2 text-[11px]"><span className="text-slate-200">{c.kind}</span>: {c.value} {c.scriptUrl ? <span className="text-slate-500">· {c.scriptUrl}</span> : null}{c.note ? <div className="text-slate-500">{c.note}</div> : null}</div>)}</div>
+                            </div>
+                          ) : null}
+                          {res.clientSideAudit.sourceMapClues?.length ? (
+                            <div>
+                              <div className="font-semibold text-amber-300">Source map clues</div>
+                              <div className="mt-1 space-y-1">{res.clientSideAudit.sourceMapClues.map((c, i) => <div key={i} className="break-all rounded bg-slate-900 p-2 text-[11px]"><div>{c.value}</div>{c.scriptUrl ? <div className="text-slate-500">Script: {c.scriptUrl}</div> : null}<div className="text-slate-400">Reachable: {c.reachable == null ? 'n/a' : c.reachable ? `yes (HTTP ${c.statusCode || 'n/a'})` : `no/not confirmed${c.statusCode ? ` (HTTP ${c.statusCode})` : ''}`}</div>{c.note ? <div className="text-slate-500">{c.note}</div> : null}</div>)}</div>
+                            </div>
+                          ) : null}
+                          {res.clientSideAudit.endpointClues?.length ? (
+                            <div>
+                              <div className="font-semibold text-sky-300">API/BaaS endpoint clues</div>
+                              <div className="mt-1 flex flex-wrap gap-1">{res.clientSideAudit.endpointClues.slice(0, 30).map((c, i) => <span key={i} className="break-all rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]" title={c.note || ''}>{c.kind}: {c.value}</span>)}</div>
+                              {res.clientSideAudit.endpointClues.length > 30 && <div className="text-[11px] text-slate-500">+{res.clientSideAudit.endpointClues.length - 30} more in JSON/export</div>}
+                            </div>
+                          ) : null}
+                          {res.clientSideAudit.domSinks?.length ? (
+                            <div>
+                              <div className="font-semibold text-orange-300">DOM sink clues (passive)</div>
+                              <div className="mt-1 space-y-1">{res.clientSideAudit.domSinks.slice(0, 20).map((c, i) => <div key={i} className="break-all rounded bg-slate-900 p-2 text-[11px]"><span className="text-slate-200">{c.value}</span> {c.scriptUrl ? <span className="text-slate-500">· {c.scriptUrl}:{c.line || '?'}</span> : null}{c.context ? <div className="text-slate-500">{c.context}</div> : null}</div>)}</div>
+                              {res.clientSideAudit.domSinks.length > 20 && <div className="text-[11px] text-slate-500">+{res.clientSideAudit.domSinks.length - 20} more in JSON/export</div>}
+                            </div>
+                          ) : null}
+                          {!res.clientSideAudit.secretFindings?.length && !res.clientSideAudit.sourceMapClues?.length && !res.clientSideAudit.endpointClues?.length && !res.clientSideAudit.domSinks?.length && <div className="text-[11px] text-slate-500">No client-side clue patterns matched by these bounded passive checks.</div>}
+                        </div>
+                      </details>
+                    )}
+
                     {res.missing && res.missing.length > 0 && (
                       <div className="pt-1 flex flex-wrap gap-1.5">
                         <span className="text-[11px] text-slate-500 mr-1">Missing Headers:</span>
