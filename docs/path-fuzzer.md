@@ -7,8 +7,8 @@ Path Fuzzer performs bounded, read-only path checks using `HEAD` requests only. 
 ## Step-by-step
 
 1. Open **Path Fuzzer** and enter an authorized HTTP or HTTPS base URL without credentials.
-2. Add one relative path per line. Safe examples include `/admin`, `/robots.txt`, and `v1/items.json`.
-3. Set concurrency conservatively. The backend defaults to 5 and caps it at 20.
+2. Add one relative path per line. Safe examples include `/admin`, `/robots.txt`, and `v1/items.json`. You can use built-in framework presets (Next.js, Vite/SPA, Laravel, Django, Spring, Env/VCS/API) to append common HEAD-only discovery paths within authorized scope.
+3. Set concurrency and optional request delay (ms) conservatively. The backend defaults to 5 workers and caps concurrency at 20. Delay helps reduce rate-limit/WAF blocking risk.
 4. Select **Run HEAD-only Path Checks**.
 5. Review candidate paths by status code and content length. Open the path manually only if that follow-up is separately authorized.
 

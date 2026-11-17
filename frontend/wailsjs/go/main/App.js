@@ -34,6 +34,10 @@ export function ExportJSON(arg1, arg2) {
   return window['go']['main']['App']['ExportJSON'](arg1, arg2);
 }
 
+export function ExportPDF(arg1, arg2) {
+  return window['go']['main']['App']['ExportPDF'](arg1, arg2);
+}
+
 export function ExportPortsCSV(arg1) {
   return window['go']['main']['App']['ExportPortsCSV'](arg1);
 }

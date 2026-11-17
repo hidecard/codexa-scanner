@@ -6,6 +6,7 @@ import {
   ExportJSON,
   ExportPortsCSV,
   ExportText,
+  ExportPDF,
   EnumerateSubdomains,
   FuzzPaths,
   InspectTLS,
@@ -526,6 +527,7 @@ ${rows || '<p>No results.</p>'}
           const totalFindings = Object.values(httpSeverity).reduce((a, b) => a + b, 0);
           const hasData = historyEntries.length > 0 || httpResults.length > 0 || findings.length > 0;
           const exportHistoryJSON = () => void ExportJSON('scan_history.json', JSON.stringify(historyEntries));
+          const exportHistoryPDF = () => void ExportPDF('scan_history.pdf', JSON.stringify(historyEntries));
           const Stat = ({ label, value, note }: { label: string; value: string | number; note?: string }) => (
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
@@ -544,6 +546,7 @@ ${rows || '<p>No results.</p>'}
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold disabled:bg-slate-700">{isHistoryBusy ? 'Loading…' : 'Refresh'}</button>
                     <button onClick={exportHistoryJSON} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
+                    <button onClick={exportHistoryPDF} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History PDF</button>
                     <button onClick={() => setActiveTab('history')} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open History</button>
                   </div>
                 </div>
@@ -911,6 +914,12 @@ ${rows || '<p>No results.</p>'}
                   >
                     Export Markdown
                   </button>
+                  <button
+                    onClick={() => ExportPDF('http_security_audit.pdf', JSON.stringify(httpResults))}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-semibold"
+                  >
+                    Export PDF
+                  </button>
                 </>
               )}
             </div>
@@ -1106,6 +1115,22 @@ ${rows || '<p>No results.</p>'}
                 <label className="flex items-center gap-2 text-xs text-slate-400"><span>Delay (ms)</span><input type="number" min={0} max={5000} step={50} value={fuzzDelayMs} onChange={(e) => setFuzzDelayMs(Number(e.target.value))} className="w-24 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
               </div>
             </div>
+            <div className="space-y-1">
+              <div className="text-[11px] text-slate-500">Framework presets (HEAD-only, bounded; use within authorized scope):</div>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['Next.js', '/_next/static/\n/api/health\n/api/auth/session\n/openapi.json\n/robots.txt\n/sitemap.xml'],
+                  ['Vite/SPA', '/assets/\n/vite.svg\n/manifest.json\n/robots.txt\n/env.js'],
+                  ['Laravel', '/.env\n/.env.example\n/storage/logs/laravel.log\n/telescope\n/api/health\n/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php'],
+                  ['Django', '/admin/login/\n/api/\n/__debug__/\n/static/\n/robots.txt'],
+                  ['Spring', '/actuator/health\n/actuator/env\n/swagger-ui.html\n/v3/api-docs\n/openapi.json'],
+                  ['Env/VCS/API', '/.env\n/.env.local\n/.env.production\n/.git/HEAD\n/docker-compose.yml\n/graphql\n/openapi.json\n/swagger.json'],
+                ] as [string, string][]).map(([label, paths]) => (
+                  <button key={label} type="button" onClick={() => setFuzzWordlist((prev) => Array.from(new Set([...(prev || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean), ...paths.split(/\r?\n/).map(s => s.trim()).filter(Boolean)])).join('\n'))} className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">{label}</button>
+                ))}
+                <button type="button" onClick={() => setFuzzWordlist('/admin\n/dashboard\n/robots.txt\n/.well-known/security.txt')} className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800">Reset default</button>
+              </div>
+            </div>
             <textarea rows={7} value={fuzzWordlist} onChange={(e) => setFuzzWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />
             <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking paths…' : 'Run HEAD-only Path Checks'}</button>
             <p className="text-[11px] text-slate-500">Sends bounded HEAD requests only, follows no redirects, and never reads or displays response bodies. A randomized missing-path check filters likely catch-all responses.</p>
@@ -1212,6 +1237,7 @@ ${rows || '<p>No results.</p>'}
             <div className="flex flex-wrap gap-2">
               <button onClick={() => void runWebAuditDiff()} disabled={isHistoryBusy || !historyTarget.trim()} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Compare Web Audit Diff</button>
               <button onClick={() => void ExportJSON('scan_history.json', JSON.stringify(historyEntries))} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
+              <button onClick={() => void ExportPDF('scan_history.pdf', JSON.stringify(historyEntries))} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History PDF</button>
               <button onClick={() => void handleClearHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg border border-rose-800 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-950 disabled:opacity-40">Clear All History</button>
             </div>
           </div>

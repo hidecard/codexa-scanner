@@ -18,6 +18,8 @@ export function EnumerateSubdomains(arg1:string,arg2:Array<string>,arg3:boolean)
 
 export function ExportJSON(arg1:string,arg2:string):Promise<string>;
 
+export function ExportPDF(arg1:string,arg2:string):Promise<string>;
+
 export function ExportPortsCSV(arg1:Array<main.PortFinding>):Promise<string>;
 
 export function ExportText(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;

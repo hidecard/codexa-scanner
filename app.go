@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,8 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"net/url"
+
+	"github.com/go-pdf/fpdf"
 )
 
 type App struct {
@@ -776,7 +779,193 @@ func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
 		evidence := strings.TrimSpace(resp.Header.Get("Server") + " " + resp.Header.Get("X-Powered-By"))
 		add("technology-disclosure", "info", "Server technology headers are exposed", "Response headers disclose implementation details that may help fingerprint the stack.", "Remove unnecessary product/version tokens; this is informational and is not proof of a vulnerability.", evidence)
 	}
+	findings = append(findings, auditCORSPolicy(resp)...)
+	findings = append(findings, auditDBErrorDisclosure(body)...)
+	findings = append(findings, auditJWTPayloadClues(resp)...)
 	return findings
+}
+
+func auditCORSPolicy(resp *http.Response) []SecurityFinding {
+	if resp == nil {
+		return nil
+	}
+	acao := strings.TrimSpace(resp.Header.Get("Access-Control-Allow-Origin"))
+	acac := strings.EqualFold(strings.TrimSpace(resp.Header.Get("Access-Control-Allow-Credentials")), "true")
+	if acao == "" {
+		return nil
+	}
+	findings := make([]SecurityFinding, 0, 2)
+	if acao == "*" && acac {
+		findings = append(findings, SecurityFinding{
+			ID:             "cors-wildcard-credentials",
+			Severity:       "high",
+			Title:          "CORS allows wildcard origin with credentials",
+			Description:    "Access-Control-Allow-Origin is '*' while Access-Control-Allow-Credentials is true. Browsers block this combination, but it indicates a misconfigured cross-origin policy.",
+			Recommendation: "Set a specific trusted origin for Access-Control-Allow-Origin when credentials are required, and avoid wildcard origins with credentials.",
+			Evidence:       "Access-Control-Allow-Origin: *; Access-Control-Allow-Credentials: true",
+		})
+	} else if acao == "*" {
+		findings = append(findings, SecurityFinding{
+			ID:             "cors-wildcard-origin",
+			Severity:       "info",
+			Title:          "CORS allows any origin",
+			Description:    "Access-Control-Allow-Origin is '*', allowing cross-origin reads from any origin for responses eligible under CORS rules.",
+			Recommendation: "Restrict allowed origins to trusted domains if the response contains non-public data or authenticated operations.",
+			Evidence:       "Access-Control-Allow-Origin: *",
+		})
+	}
+	return findings
+}
+
+func auditDBErrorDisclosure(body []byte) []SecurityFinding {
+	if len(body) == 0 {
+		return nil
+	}
+	sample := body
+	if len(sample) > 8192 {
+		sample = sample[:8192]
+	}
+	lower := strings.ToLower(string(sample))
+	patterns := []struct {
+		id    string
+		match string
+		label string
+	}{
+		{"db-error-sql-syntax", "sql syntax", "SQL syntax error"},
+		{"db-error-mysql", "mysql_fetch", "MySQL error string"},
+		{"db-error-postgres", "pg::syntaxerror", "PostgreSQL syntax error"},
+		{"db-error-oracle", "ora-", "Oracle error code"},
+		{"db-error-sqlite", "sqlite3::sqlexception", "SQLite exception"},
+		{"db-error-sqlstate", "sqlstate[", "SQLSTATE error"},
+		{"db-error-pdo", "pdoexception", "PDO exception"},
+		{"db-error-mongodb", "mongoerror", "MongoDB error"},
+	}
+	for _, p := range patterns {
+		idx := strings.Index(lower, p.match)
+		if idx < 0 {
+			continue
+		}
+		start := idx - 40
+		if start < 0 {
+			start = 0
+		}
+		end := idx + len(p.match) + 60
+		if end > len(sample) {
+			end = len(sample)
+		}
+		snippet := strings.Join(strings.Fields(string(sample[start:end])), " ")
+		if len(snippet) > 160 {
+			snippet = snippet[:160] + "..."
+		}
+		return []SecurityFinding{{
+			ID:             p.id,
+			Severity:       "medium",
+			Title:          "Possible database error disclosure in response",
+			Description:    "The sampled response body contains text resembling a database error (" + p.label + "). This may expose internal query or schema details.",
+			Recommendation: "Return generic error messages to clients and log detailed database errors server-side only.",
+			Evidence:       snippet,
+		}}
+	}
+	return nil
+}
+
+func auditJWTPayloadClues(resp *http.Response) []SecurityFinding {
+	if resp == nil {
+		return nil
+	}
+	candidates := make([]string, 0, 4)
+	for _, values := range resp.Header {
+		for _, v := range values {
+			candidates = append(candidates, v)
+		}
+	}
+	for _, c := range resp.Cookies() {
+		if c != nil && c.Value != "" {
+			candidates = append(candidates, c.Value)
+		}
+	}
+	for _, cand := range candidates {
+		for _, token := range extractJWTCandidates(cand) {
+			if finding, ok := inspectJWTClue(token); ok {
+				return []SecurityFinding{finding}
+			}
+		}
+	}
+	return nil
+}
+
+func extractJWTCandidates(s string) []string {
+	out := make([]string, 0, 2)
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == ';' || r == ',' || r == '"' || r == '\'' || r == '(' || r == ')' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		if strings.HasPrefix(part, "Bearer ") {
+			part = strings.TrimPrefix(part, "Bearer ")
+		}
+		if strings.Count(part, ".") != 2 || !strings.HasPrefix(part, "eyJ") {
+			continue
+		}
+		out = append(out, part)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+func inspectJWTClue(token string) (SecurityFinding, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2+1 {
+		return SecurityFinding{}, false
+	}
+	decode := func(seg string) ([]byte, error) {
+		if m := len(seg) % 4; m != 0 {
+			seg += strings.Repeat("=", 4-m)
+		}
+		seg = strings.ReplaceAll(seg, "-", "+")
+		seg = strings.ReplaceAll(seg, "_", "/")
+		return base64.StdEncoding.DecodeString(seg)
+	}
+	headerBytes, err := decode(parts[0])
+	if err != nil {
+		return SecurityFinding{}, false
+	}
+	payloadBytes, err := decode(parts[1])
+	if err != nil {
+		return SecurityFinding{}, false
+	}
+	var header map[string]any
+	var payload map[string]any
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return SecurityFinding{}, false
+	}
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return SecurityFinding{}, false
+	}
+	alg, _ := header["alg"].(string)
+	_, hasExp := payload["exp"]
+	_, hasNbf := payload["nbf"]
+	if strings.EqualFold(strings.TrimSpace(alg), "none") {
+		return SecurityFinding{
+			ID:             "jwt-alg-none",
+			Severity:       "high",
+			Title:          "JWT header indicates alg:none",
+			Description:    "A JWT observed in response headers/cookies declares algorithm 'none' in its header metadata. This is a common misconfiguration clue (passive decode only; signature not verified).",
+			Recommendation: "Reject tokens with alg 'none' server-side and require a strong signing algorithm (e.g., RS256/ES256/HS256 as appropriate).",
+			Evidence:       "Decoded JWT header alg=none (token value redacted)",
+		}, true
+	}
+	if !hasExp && !hasNbf {
+		return SecurityFinding{
+			ID:             "jwt-missing-exp",
+			Severity:       "info",
+			Title:          "JWT payload has no exp/nbf claim",
+			Description:    "A JWT observed in response headers/cookies does not include 'exp' or 'nbf' claims in decoded payload metadata. This may indicate long-lived tokens depending on context (passive decode only).",
+			Recommendation: "Include appropriate expiration (exp) and, where relevant, not-before (nbf) claims and enforce them server-side.",
+			Evidence:       "Decoded JWT payload missing exp/nbf (token value redacted)",
+		}, true
+	}
+	return SecurityFinding{}, false
 }
 
 func auditCSPDirectives(raw string) []SecurityFinding {
@@ -931,24 +1120,64 @@ func tlsVersionName(v uint16) string {
 const (
 	reportSchemaVersion = "1.0"
 	reportGenerator     = "Codexa Scanner"
+	reportBrandName     = "Codexa Scanner"
+	reportDeveloper     = "Developed by H!D3-C4rD (https://arkaryan.net/)"
 )
 
-type reportRedactionPolicy struct {
+// ReportRedactionPolicy documents bounded best-effort redaction applied to
+// persisted history and exported reports. It is not a guarantee that all
+// sensitive data is removed.
+type ReportRedactionPolicy struct {
 	Applied bool     `json:"applied"`
 	Scope   []string `json:"scope"`
 	Note    string   `json:"note"`
 }
 
-type scanReportEnvelope struct {
+// ReportMetadata captures export context for the shared, versioned report model.
+type ReportMetadata struct {
+	DefaultFilename string `json:"defaultFilename,omitempty"`
+	Target          string `json:"target,omitempty"`
+	RecordCount     int    `json:"recordCount,omitempty"`
+}
+
+// ReportSeverityBreakdown summarizes finding severities when available.
+type ReportSeverityBreakdown struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+	Info     int `json:"info"`
+	Total    int `json:"total"`
+}
+
+// ReportSummary provides an executive/technical overview derived from report data.
+type ReportSummary struct {
+	Title             string                  `json:"title"`
+	Overview          string                  `json:"overview"`
+	Targets           int                     `json:"targets,omitempty"`
+	Errors            int                     `json:"errors,omitempty"`
+	AverageRiskScore  int                     `json:"averageRiskScore,omitempty"`
+	SeverityBreakdown *ReportSeverityBreakdown `json:"severityBreakdown,omitempty"`
+	TopFindings       []string                `json:"topFindings,omitempty"`
+	Recommendations   []string                `json:"recommendations,omitempty"`
+}
+
+// ScanReportEnvelope is the shared, versioned report/export model used by JSON,
+// HTML/Markdown content generation inputs where applicable, and PDF exports.
+// Data is always redacted according to Redaction before serialization.
+type ScanReportEnvelope struct {
 	ReportVersion string                `json:"reportVersion"`
 	GeneratedAt   string                `json:"generatedAt"`
 	Tool          string                `json:"tool"`
 	ReportType    string                `json:"reportType"`
-	Redaction     reportRedactionPolicy `json:"redaction"`
+	Metadata      ReportMetadata        `json:"metadata,omitempty"`
+	Redaction     ReportRedactionPolicy `json:"redaction"`
+	Summary       *ReportSummary        `json:"summary,omitempty"`
+	Comparison    any                   `json:"comparison,omitempty"`
 	Data          any                   `json:"data"`
 }
 
-var defaultReportRedactionPolicy = reportRedactionPolicy{
+var defaultReportRedactionPolicy = ReportRedactionPolicy{
 	Applied: true,
 	Scope: []string{
 		"embedded URL credentials (userinfo)",
@@ -990,12 +1219,12 @@ func inferReportType(defaultFilename string, data any) string {
 	return "scan-report"
 }
 
-func buildScanReportEnvelope(defaultFilename string, data any) scanReportEnvelope {
+func buildScanReportEnvelope(defaultFilename string, data any) ScanReportEnvelope {
 	if m, ok := data.(map[string]any); ok {
 		if _, hasVersion := m["reportVersion"]; hasVersion {
 			if _, hasData := m["data"]; hasData {
 				if _, hasTool := m["tool"]; hasTool {
-					// Assume already a report envelope; normalize policy/timestamp if missing.
+					// Normalize existing envelope fields while preserving content.
 					if _, ok := m["redaction"]; !ok {
 						m["redaction"] = defaultReportRedactionPolicy
 					}
@@ -1005,19 +1234,308 @@ func buildScanReportEnvelope(defaultFilename string, data any) scanReportEnvelop
 					if _, ok := m["reportType"]; !ok {
 						m["reportType"] = inferReportType(defaultFilename, m["data"])
 					}
-					// Preserve as-is by returning wrapped map via Data? easier: return envelope with map in Data loses shape.
+					if b, err := json.Marshal(m); err == nil {
+						var env ScanReportEnvelope
+						if err := json.Unmarshal(b, &env); err == nil {
+							if env.ReportVersion == "" {
+								env.ReportVersion = reportSchemaVersion
+							}
+							if env.Tool == "" {
+								env.Tool = reportGenerator
+							}
+							if env.GeneratedAt == "" {
+								env.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+							}
+							if env.Metadata.DefaultFilename == "" {
+								env.Metadata.DefaultFilename = defaultFilename
+							}
+							return env
+						}
+					}
+				}
+			}
+		}
+		// Allow callers to pass { "data": ..., "comparison": ..., "metadata": ... }
+		if inner, hasData := m["data"]; hasData {
+			reportType := inferReportType(defaultFilename, inner)
+			env := ScanReportEnvelope{
+				ReportVersion: reportSchemaVersion,
+				GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+				Tool:          reportGenerator,
+				ReportType:    reportType,
+				Metadata:      ReportMetadata{DefaultFilename: defaultFilename},
+				Redaction:     defaultReportRedactionPolicy,
+				Data:          inner,
+				Comparison:    m["comparison"],
+			}
+			if meta, ok := m["metadata"].(map[string]any); ok {
+				if b, err := json.Marshal(meta); err == nil {
+					_ = json.Unmarshal(b, &env.Metadata)
+				}
+				if env.Metadata.DefaultFilename == "" {
+					env.Metadata.DefaultFilename = defaultFilename
+				}
+			}
+			env.Summary = deriveReportSummary(reportType, inner)
+			return env
+		}
+	}
+	reportType := inferReportType(defaultFilename, data)
+	env := ScanReportEnvelope{
+		ReportVersion: reportSchemaVersion,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		Tool:          reportGenerator,
+		ReportType:    reportType,
+		Metadata: ReportMetadata{
+			DefaultFilename: defaultFilename,
+		},
+		Redaction: defaultReportRedactionPolicy,
+		Data:      data,
+	}
+	if arr, ok := data.([]any); ok {
+		env.Metadata.RecordCount = len(arr)
+	}
+	env.Summary = deriveReportSummary(reportType, data)
+	return env
+}
+
+func deriveReportSummary(reportType string, data any) *ReportSummary {
+	switch reportType {
+	case "web-audit":
+		return deriveWebAuditSummary(data)
+	case "scan-history":
+		return deriveHistorySummary(data)
+	default:
+		return &ReportSummary{
+			Title:    "Scan Report",
+			Overview: "Shared, versioned scan report generated by Codexa Scanner. Review findings and redact remaining sensitive data before sharing.",
+		}
+	}
+}
+
+func deriveHistorySummary(data any) *ReportSummary {
+	arr, ok := data.([]any)
+	if !ok {
+		return &ReportSummary{
+			Title:    "Scan History Report",
+			Overview: "Locally stored scan history export. Entries may include different scan types; review before sharing.",
+		}
+	}
+	types := map[string]int{}
+	targets := map[string]bool{}
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t := asString(m["scanType"]); t != "" {
+			types[t]++
+		}
+		if t := asString(m["target"]); t != "" {
+			targets[t] = true
+		}
+	}
+	top := make([]string, 0, len(types))
+	for k, v := range types {
+		top = append(top, fmt.Sprintf("%s: %d", k, v))
+	}
+	// stable-ish small output
+	if len(top) > 5 {
+		top = top[:5]
+	}
+	return &ReportSummary{
+		Title:        "Scan History Report",
+		Overview:     "Shared, versioned export of locally stored scan history. Contains bounded, redacted records from the History view; review before sharing.",
+		Targets:      len(targets),
+		TopFindings:  top,
+		Recommendations: []string{"Review exported history for sensitive targets or internal context before sharing externally."},
+	}
+}
+
+func deriveWebAuditSummary(data any) *ReportSummary {
+	results, ok := normalizeWebAuditResults(data)
+	if !ok {
+		return &ReportSummary{
+			Title:    "Web Audit Report",
+			Overview: "Bounded passive Web Audit results. Findings are heuristics, not proof of exploitability.",
+		}
+	}
+	breakdown := &ReportSeverityBreakdown{}
+	top := make([]string, 0, 5)
+	recs := make([]string, 0, 5)
+	seenRec := map[string]bool{}
+	riskTotal, graded, errorsCount := 0, 0, 0
+	for _, r := range results {
+		errText, _ := r["error"].(string)
+		if strings.TrimSpace(errText) != "" {
+			errorsCount++
+			continue
+		}
+		if rs, ok := numberToInt(r["riskScore"]); ok {
+			riskTotal += rs
+			graded++
+		}
+		findings, _ := r["findings"].([]any)
+		for _, f := range findings {
+			fm, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			sev := strings.ToLower(strings.TrimSpace(asString(fm["severity"])))
+			switch sev {
+			case "critical":
+				breakdown.Critical++
+			case "high":
+				breakdown.High++
+			case "medium":
+				breakdown.Medium++
+			case "low":
+				breakdown.Low++
+			default:
+				breakdown.Info++
+			}
+			breakdown.Total++
+			title := asString(fm["title"])
+			if title != "" && len(top) < 5 {
+				label := fmt.Sprintf("[%s] %s", strings.ToUpper(sevOrInfo(sev)), title)
+				dup := false
+				for _, t := range top {
+					if t == label {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					top = append(top, label)
+				}
+			}
+			rec := strings.TrimSpace(asString(fm["recommendation"]))
+			if rec != "" && !seenRec[rec] && len(recs) < 6 {
+				seenRec[rec] = true
+				recs = append(recs, rec)
+			}
+		}
+	}
+	avg := 0
+	if graded > 0 {
+		avg = riskTotal / graded
+	}
+	return &ReportSummary{
+		Title:    "Web Audit Summary Report",
+		Overview: "Executive summary of bounded passive Web Audit observations. Findings are heuristics and should be validated in authorized context before remediation prioritization.",
+		Targets:  len(results), Errors: errorsCount, AverageRiskScore: avg,
+		SeverityBreakdown: breakdown, TopFindings: top, Recommendations: recs,
+	}
+}
+
+func sevOrInfo(sev string) string {
+	if sev == "" {
+		return "info"
+	}
+	return sev
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func numberToInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil {
+			return int(i), true
+		}
+	}
+	return 0, false
+}
+
+func normalizeWebAuditResults(data any) ([]map[string]any, bool) {
+	arr, ok := data.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			// Heuristic: web audit result usually has url/finalUrl/findings/statusCode
+			if _, hasURL := m["url"]; hasURL {
+				out = append(out, m)
+				continue
+			}
+			if _, hasFindings := m["findings"]; hasFindings {
+				out = append(out, m)
+			}
+		}
+	}
+	if len(out) == 0 && len(arr) > 0 {
+		// try to coerce all maps anyway
+		for _, item := range arr {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+	}
+	return out, len(out) > 0
+}
+
+func prepareScanReportEnvelope(defaultFilename string, jsonData string) (ScanReportEnvelope, []byte, error) {
+	if strings.TrimSpace(jsonData) == "" {
+		jsonData = "null"
+	}
+	var raw interface{}
+	if err := json.Unmarshal([]byte(jsonData), &raw); err != nil {
+		raw = jsonData
+	}
+	redacted := redactHistoryResult(raw)
+	env := buildScanReportEnvelope(defaultFilename, redacted)
+
+	// If caller passed an already-enveloped report, prefer normalized map to preserve extra fields.
+	var outBytes []byte
+	if m, ok := redacted.(map[string]any); ok {
+		if _, hasVersion := m["reportVersion"]; hasVersion {
+			if _, hasData := m["data"]; hasData {
+				if _, hasTool := m["tool"]; hasTool {
+					if _, ok := m["redaction"]; !ok {
+						m["redaction"] = env.Redaction
+					}
+					if _, ok := m["generatedAt"]; !ok {
+						m["generatedAt"] = env.GeneratedAt
+					}
+					if _, ok := m["reportType"]; !ok {
+						m["reportType"] = env.ReportType
+					}
+					if _, ok := m["metadata"]; !ok {
+						m["metadata"] = env.Metadata
+					}
+					if _, ok := m["summary"]; !ok && env.Summary != nil {
+						m["summary"] = env.Summary
+					}
+					if b, err := json.MarshalIndent(m, "", "  "); err == nil {
+						outBytes = b
+					}
 				}
 			}
 		}
 	}
-	return scanReportEnvelope{
-		ReportVersion: reportSchemaVersion,
-		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		Tool:          reportGenerator,
-		ReportType:    inferReportType(defaultFilename, data),
-		Redaction:     defaultReportRedactionPolicy,
-		Data:          data,
+	if outBytes == nil {
+		b, err := json.MarshalIndent(env, "", "  ")
+		if err != nil {
+			b, err = json.Marshal(env)
+			if err != nil {
+				return ScanReportEnvelope{}, nil, err
+			}
+		}
+		outBytes = b
 	}
+	return env, outBytes, nil
 }
 
 // ExportJSON saves scan data as a versioned, redacted JSON report envelope.
@@ -1033,48 +1551,10 @@ func (a *App) ExportJSON(defaultFilename string, jsonData string) (string, error
 		return "", err
 	}
 
-	// Parse, redact, and wrap in a versioned report envelope before saving.
-	if jsonData == "" {
-		jsonData = "null"
+	_, outBytes, err := prepareScanReportEnvelope(defaultFilename, jsonData)
+	if err != nil {
+		return "", err
 	}
-	var raw interface{}
-	if err := json.Unmarshal([]byte(jsonData), &raw); err != nil {
-		raw = jsonData
-	}
-	redacted := redactHistoryResult(raw)
-
-	var outBytes []byte
-	if m, ok := redacted.(map[string]any); ok {
-		if _, hasVersion := m["reportVersion"]; hasVersion {
-			if _, hasData := m["data"]; hasData {
-				if _, hasTool := m["tool"]; hasTool {
-					if _, ok := m["redaction"]; !ok {
-						m["redaction"] = defaultReportRedactionPolicy
-					}
-					if _, ok := m["generatedAt"]; !ok {
-						m["generatedAt"] = time.Now().UTC().Format(time.RFC3339)
-					}
-					if _, ok := m["reportType"]; !ok {
-						m["reportType"] = inferReportType(defaultFilename, m["data"])
-					}
-					if b, err := json.MarshalIndent(m, "", "  "); err == nil {
-						outBytes = b
-					}
-				}
-			}
-		}
-	}
-	if outBytes == nil {
-		envelope := buildScanReportEnvelope(defaultFilename, redacted)
-		if b, err := json.MarshalIndent(envelope, "", "  "); err == nil {
-			outBytes = b
-		} else if b, err := json.Marshal(envelope); err == nil {
-			outBytes = b
-		} else {
-			return "", err
-		}
-	}
-
 	err = os.WriteFile(path, outBytes, 0644)
 	return path, err
 }
@@ -1108,21 +1588,458 @@ func (a *App) ExportPortsCSV(findings []PortFinding) (string, error) {
 	return path, nil
 }
 
-// ExportText saves plain text content (HTML/Markdown reports) via a native dialog.
-func (a *App) ExportText(defaultFilename string, content string, filterName string, pattern string) (string, error) {
-	if filterName == "" {
-		filterName = "Text Files (*.txt)"
-	}
-	if pattern == "" {
-		pattern = "*.txt"
-	}
+// ExportPDF saves a branded PDF report (executive summary, findings, severity,
+// risk, recommendations, metadata, and optional supported historical comparison).
+func (a *App) ExportPDF(defaultFilename string, jsonData string) (string, error) {
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Save Report",
+		Title:           "Save Scan Report (PDF)",
 		DefaultFilename: defaultFilename,
-		Filters:         []runtime.FileFilter{{DisplayName: filterName, Pattern: pattern}},
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"},
+		},
 	})
 	if err != nil || path == "" {
 		return "", err
 	}
-	return path, os.WriteFile(path, []byte(content), 0644)
+	env, _, err := prepareScanReportEnvelope(defaultFilename, jsonData)
+	if err != nil {
+		return "", err
+	}
+	if err := writePDFReport(path, env); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ExportText saves text content (HTML/Markdown/etc.) to a user-selected file.
+func (a *App) ExportText(defaultFilename string, content string, filterName string, pattern string) (string, error) {
+	if strings.TrimSpace(filterName) == "" {
+		filterName = "Text Files (*.*)"
+	}
+	if strings.TrimSpace(pattern) == "" {
+		pattern = "*.*"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Report",
+		DefaultFilename: defaultFilename,
+		Filters: []runtime.FileFilter{
+			{DisplayName: filterName, Pattern: pattern},
+		},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func writePDFReport(path string, env ScanReportEnvelope) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetTitle(reportBrandName+" Report", false)
+	pdf.SetAuthor(reportBrandName, false)
+	pdf.SetMargins(14, 14, 14)
+	pdf.SetAutoPageBreak(true, 16)
+	pdf.AddPage()
+
+	left, _, right, _ := pdf.GetMargins()
+	pageW, _ := pdf.GetPageSize()
+	contentW := pageW - left - right
+
+	// Branded header band
+	pdf.SetFillColor(6, 78, 59) // emerald-900
+	pdf.Rect(0, 0, pageW, 28, "F")
+	pdf.SetXY(left, 8)
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.SetTextColor(236, 253, 245)
+	pdf.CellFormat(0, 8, reportBrandName, "", 1, "L", false, 0, "")
+	pdf.SetX(left)
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.SetTextColor(167, 243, 208)
+	pdf.CellFormat(0, 5, reportDeveloper+"  -  Bounded passive security assessment report", "", 1, "L", false, 0, "")
+	pdf.SetTextColor(15, 23, 42)
+	pdf.SetY(34)
+
+	title := "Scan Report"
+	if env.Summary != nil && strings.TrimSpace(env.Summary.Title) != "" {
+		title = env.Summary.Title
+	}
+	pdf.SetFont("Helvetica", "B", 15)
+	pdf.MultiCell(contentW, 7, title, "", "L", false)
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.SetTextColor(71, 85, 105)
+	pdf.MultiCell(contentW, 4.8, fmt.Sprintf("Generated: %s   -   Report type: %s   -   Schema: v%s", env.GeneratedAt, env.ReportType, env.ReportVersion), "", "L", false)
+	if t := strings.TrimSpace(env.Metadata.Target); t != "" {
+		pdf.MultiCell(contentW, 4.8, "Target: "+truncateForPDF(t, 140), "", "L", false)
+	}
+	if env.Metadata.RecordCount > 0 {
+		pdf.MultiCell(contentW, 4.8, fmt.Sprintf("Records: %d", env.Metadata.RecordCount), "", "L", false)
+	}
+	pdf.SetTextColor(15, 23, 42)
+	pdf.Ln(2)
+
+	// Executive summary card
+	overview := "Bounded assessment report. Review findings and redact remaining sensitive data before sharing."
+	if env.Summary != nil && strings.TrimSpace(env.Summary.Overview) != "" {
+		overview = env.Summary.Overview
+	}
+	pdfSectionTitle(pdf, contentW, "Executive Summary")
+	pdfCardStart(pdf, contentW)
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.MultiCell(contentW-6, 5.2, overview, "", "L", false)
+	if env.Summary != nil {
+		pdf.Ln(1)
+		pdf.SetFont("Helvetica", "B", 9)
+		pdf.MultiCell(contentW-6, 5, fmt.Sprintf("Targets analyzed: %d    Errors: %d    Average risk: %d/100", env.Summary.Targets, env.Summary.Errors, env.Summary.AverageRiskScore), "", "L", false)
+	}
+	pdfCardEnd(pdf)
+	pdf.Ln(2)
+
+	// Severity breakdown
+	if env.Summary != nil && env.Summary.SeverityBreakdown != nil {
+		b := env.Summary.SeverityBreakdown
+		pdfSectionTitle(pdf, contentW, "Severity Breakdown")
+		cols := []struct {
+			label string
+			value int
+			fill  [3]int
+			text  [3]int
+		}{
+			{"Critical", b.Critical, [3]int{254, 226, 226}, [3]int{153, 27, 27}},
+			{"High", b.High, [3]int{255, 237, 213}, [3]int{154, 52, 18}},
+			{"Medium", b.Medium, [3]int{254, 249, 195}, [3]int{133, 77, 14}},
+			{"Low", b.Low, [3]int{219, 234, 254}, [3]int{30, 64, 175}},
+			{"Info", b.Info, [3]int{241, 245, 249}, [3]int{51, 65, 85}},
+		}
+		colW := (contentW - 8) / 5.0
+		x := left
+		y := pdf.GetY()
+		for i, c := range cols {
+			pdf.SetXY(x, y)
+			pdf.SetFillColor(c.fill[0], c.fill[1], c.fill[2])
+			pdf.SetDrawColor(226, 232, 240)
+			pdf.Rect(x, y, colW, 16, "FD")
+			pdf.SetXY(x, y+2.5)
+			pdf.SetFont("Helvetica", "B", 12)
+			pdf.SetTextColor(c.text[0], c.text[1], c.text[2])
+			pdf.CellFormat(colW, 6, fmt.Sprintf("%d", c.value), "", 0, "C", false, 0, "")
+			pdf.SetXY(x, y+9)
+			pdf.SetFont("Helvetica", "", 8)
+			pdf.CellFormat(colW, 4, c.label, "", 0, "C", false, 0, "")
+			x += colW + 2
+			if i == 4 {
+				_ = i
+			}
+		}
+		pdf.SetTextColor(15, 23, 42)
+		pdf.SetDrawColor(0, 0, 0)
+		pdf.SetY(y + 19)
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(71, 85, 105)
+		pdf.CellFormat(contentW, 5, fmt.Sprintf("Total findings: %d", b.Total), "", 1, "L", false, 0, "")
+		pdf.SetTextColor(15, 23, 42)
+		pdf.Ln(2)
+	}
+
+	// Key findings
+	if env.Summary != nil && len(env.Summary.TopFindings) > 0 {
+		pdfSectionTitle(pdf, contentW, "Key Findings")
+		pdfCardStart(pdf, contentW)
+		pdf.SetFont("Helvetica", "", 9.5)
+		for _, f := range env.Summary.TopFindings {
+			pdfBullet(pdf, contentW-6, sanitizeForPDF(truncateForPDF(f, 180)))
+		}
+		pdfCardEnd(pdf)
+		pdf.Ln(2)
+	}
+
+	// Recommendations
+	if env.Summary != nil && len(env.Summary.Recommendations) > 0 {
+		pdfSectionTitle(pdf, contentW, "Recommendations")
+		pdfCardStart(pdf, contentW)
+		pdf.SetFont("Helvetica", "", 9.5)
+		for _, r := range env.Summary.Recommendations {
+			pdfBullet(pdf, contentW-6, sanitizeForPDF(truncateForPDF(r, 220)))
+		}
+		pdfCardEnd(pdf)
+		pdf.Ln(2)
+	}
+
+	// Historical comparison
+	if env.Comparison != nil {
+		pdfSectionTitle(pdf, contentW, "Historical Comparison (Supported)")
+		pdfCardStart(pdf, contentW)
+		compBytes, err := json.MarshalIndent(env.Comparison, "", "  ")
+		if err == nil {
+			pdf.SetFont("Courier", "", 8)
+			for _, line := range splitPDFLines(string(compBytes), 4000) {
+				pdf.MultiCell(contentW-6, 4.2, sanitizeForPDF(truncateForPDF(line, 180)), "", "L", false)
+			}
+		} else {
+			pdf.SetFont("Helvetica", "", 9)
+			pdf.MultiCell(contentW-6, 5, "Comparison data available but could not be rendered.", "", "L", false)
+		}
+		pdfCardEnd(pdf)
+		pdf.Ln(2)
+	}
+
+	// Technical findings
+	if env.ReportType == "web-audit" {
+		writeWebAuditPDFDetails(pdf, env.Data)
+		pdf.Ln(1)
+	}
+
+	// Metadata & redaction
+	pdfSectionTitle(pdf, contentW, "Metadata & Redaction Policy")
+	pdfCardStart(pdf, contentW)
+	pdf.SetFont("Helvetica", "", 9)
+	pdfKeyValue(pdf, contentW-6, "Tool", env.Tool)
+	pdfKeyValue(pdf, contentW-6, "Report version", env.ReportVersion)
+	pdfKeyValue(pdf, contentW-6, "Report type", env.ReportType)
+	if strings.TrimSpace(env.Metadata.DefaultFilename) != "" {
+		pdfKeyValue(pdf, contentW-6, "Suggested file", env.Metadata.DefaultFilename)
+	}
+	pdfKeyValue(pdf, contentW-6, "Redaction applied", fmt.Sprintf("%v", env.Redaction.Applied))
+	if len(env.Redaction.Scope) > 0 {
+		pdf.MultiCell(contentW-6, 4.8, sanitizeForPDF("Scope: "+strings.Join(env.Redaction.Scope, "; ")), "", "L", false)
+	}
+	if env.Redaction.Note != "" {
+		pdf.MultiCell(contentW-6, 4.8, sanitizeForPDF("Note: "+env.Redaction.Note), "", "L", false)
+	}
+	pdfCardEnd(pdf)
+
+	pdf.Ln(3)
+	pdf.SetFont("Helvetica", "I", 8)
+	pdf.SetTextColor(100, 116, 139)
+	pdf.MultiCell(contentW, 4, sanitizeForPDF("Bounded passive observations. Grades and risk scores are heuristics, not CVSS and not proof of exploitability. Use only on explicitly authorized targets. Review and manually redact remaining sensitive data before sharing."), "", "L", false)
+
+	if err := pdf.Error(); err != nil {
+		return err
+	}
+	return pdf.OutputFileAndClose(path)
+}
+
+func pdfSectionTitle(pdf *fpdf.Fpdf, contentW float64, title string) {
+	pdf.SetFont("Helvetica", "B", 12)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.CellFormat(0, 7, sanitizeForPDF(title), "", 1, "L", false, 0, "")
+	x := pdf.GetX()
+	y := pdf.GetY() - 0.5
+	pdf.SetDrawColor(16, 185, 129)
+	pdf.SetLineWidth(0.6)
+	pdf.Line(x, y, x+22, y)
+	pdf.SetLineWidth(0.2)
+	pdf.SetDrawColor(0, 0, 0)
+	pdf.Ln(1.5)
+}
+
+func pdfCardStart(pdf *fpdf.Fpdf, contentW float64) {
+	y := pdf.GetY()
+	pdf.SetFillColor(248, 250, 252)
+	pdf.SetDrawColor(226, 232, 240)
+	pdf.Rect(pdf.GetX(), y, contentW, 0.1, "")
+	pdf.SetXY(pdf.GetX()+3, y+2.5)
+}
+
+func pdfCardEnd(pdf *fpdf.Fpdf) {
+	// draw a light bottom spacer line by moving cursor; fpdf lacks easy dynamic card height, so add spacing
+	pdf.SetDrawColor(0, 0, 0)
+	pdf.Ln(2)
+}
+
+func pdfBullet(pdf *fpdf.Fpdf, w float64, text string) {
+	x := pdf.GetX()
+	pdf.CellFormat(4, 5, "-", "", 0, "L", false, 0, "")
+	pdf.MultiCell(w-4, 5, text, "", "L", false)
+	pdf.SetX(x)
+}
+
+func pdfKeyValue(pdf *fpdf.Fpdf, w float64, key, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	x := pdf.GetX()
+	pdf.SetFont("Helvetica", "B", 9)
+	pdf.CellFormat(36, 5, key+":", "", 0, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.MultiCell(w-36, 5, sanitizeForPDF(truncateForPDF(value, 220)), "", "L", false)
+	pdf.SetX(x)
+}
+
+func writeWebAuditPDFDetails(pdf *fpdf.Fpdf, data any) {
+	results, ok := normalizeWebAuditResults(data)
+	if !ok || len(results) == 0 {
+		return
+	}
+	left, _, right, _ := pdf.GetMargins()
+	pageW, _ := pdf.GetPageSize()
+	contentW := pageW - left - right
+	pdfSectionTitle(pdf, contentW, "Technical Findings (Web Audit)")
+	maxTargets := 50
+	for i, r := range results {
+		if i >= maxTargets {
+			pdf.SetFont("Helvetica", "I", 9)
+			pdf.SetTextColor(71, 85, 105)
+			pdf.MultiCell(contentW, 5, sanitizeForPDF(fmt.Sprintf("... %d additional targets omitted from PDF detail (see JSON export for full data).", len(results)-maxTargets)), "", "L", false)
+			pdf.SetTextColor(15, 23, 42)
+			break
+		}
+		url := asString(r["url"])
+		if url == "" {
+			url = asString(r["finalUrl"])
+		}
+		if url == "" {
+			url = fmt.Sprintf("Target %d", i+1)
+		}
+		status, _ := numberToInt(r["statusCode"])
+		risk, _ := numberToInt(r["riskScore"])
+		grade := asString(r["grade"])
+		errText := asString(r["error"])
+		findings, _ := r["findings"].([]any)
+
+		// target header bar
+		y := pdf.GetY()
+		if y > 250 {
+			pdf.AddPage()
+			y = pdf.GetY()
+		}
+		pdf.SetFillColor(241, 245, 249)
+		pdf.SetDrawColor(226, 232, 240)
+		pdf.Rect(left, y, contentW, 8, "FD")
+		pdf.SetXY(left+2, y+1.5)
+		pdf.SetFont("Helvetica", "B", 9.5)
+		pdf.SetTextColor(15, 23, 42)
+		pdf.CellFormat(contentW-4, 5, sanitizeForPDF(truncateForPDF(url, 120)), "", 1, "L", false, 0, "")
+		pdf.SetXY(left+2, pdf.GetY()+0.5)
+
+		if strings.TrimSpace(errText) != "" {
+			pdf.SetFont("Helvetica", "", 9)
+			pdf.SetTextColor(185, 28, 28)
+			pdf.MultiCell(contentW-4, 4.8, sanitizeForPDF("Error: "+truncateForPDF(errText, 240)), "", "L", false)
+			pdf.SetTextColor(15, 23, 42)
+			pdf.Ln(2)
+			continue
+		}
+
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(51, 65, 85)
+		meta := fmt.Sprintf("Status: %d   Grade: %s   Risk: %d/100   Findings: %d", status, gradeOrDash(grade), risk, len(findings))
+		pdf.MultiCell(contentW-4, 4.8, sanitizeForPDF(meta), "", "L", false)
+		if final := asString(r["finalUrl"]); final != "" && final != url {
+			pdf.MultiCell(contentW-4, 4.8, sanitizeForPDF("Final URL: "+truncateForPDF(final, 140)), "", "L", false)
+		}
+		pdf.SetTextColor(15, 23, 42)
+
+		if len(findings) == 0 {
+			pdf.SetFont("Helvetica", "I", 9)
+			pdf.SetTextColor(71, 85, 105)
+			pdf.MultiCell(contentW-4, 4.8, "No passive findings reported for this target.", "", "L", false)
+			pdf.SetTextColor(15, 23, 42)
+			pdf.Ln(1.5)
+			continue
+		}
+
+		limit := len(findings)
+		if limit > 20 {
+			limit = 20
+		}
+		for j := 0; j < limit; j++ {
+			fm, _ := findings[j].(map[string]any)
+			if fm == nil {
+				continue
+			}
+			sev := strings.ToUpper(sevOrInfo(asString(fm["severity"])))
+			title := asString(fm["title"])
+			desc := asString(fm["description"])
+			rec := asString(fm["recommendation"])
+			ev := asString(fm["evidence"])
+			pdf.SetFont("Helvetica", "B", 9)
+			pdf.MultiCell(contentW-4, 4.8, sanitizeForPDF(fmt.Sprintf("[%s] %s", sev, truncateForPDF(title, 150))), "", "L", false)
+			pdf.SetFont("Helvetica", "", 8.8)
+			if desc != "" {
+				pdf.MultiCell(contentW-4, 4.5, sanitizeForPDF(truncateForPDF(desc, 260)), "", "L", false)
+			}
+			if ev != "" {
+				pdf.SetTextColor(71, 85, 105)
+				pdf.MultiCell(contentW-4, 4.3, sanitizeForPDF("Evidence: "+truncateForPDF(ev, 220)), "", "L", false)
+				pdf.SetTextColor(15, 23, 42)
+			}
+			if rec != "" {
+				pdf.SetTextColor(6, 95, 70)
+				pdf.MultiCell(contentW-4, 4.3, sanitizeForPDF("Remediation: "+truncateForPDF(rec, 240)), "", "L", false)
+				pdf.SetTextColor(15, 23, 42)
+			}
+			pdf.Ln(0.8)
+		}
+		if len(findings) > limit {
+			pdf.SetFont("Helvetica", "I", 8.5)
+			pdf.SetTextColor(71, 85, 105)
+			pdf.MultiCell(contentW-4, 4.5, sanitizeForPDF(fmt.Sprintf("... %d additional findings omitted for this target in PDF (see JSON).", len(findings)-limit)), "", "L", false)
+			pdf.SetTextColor(15, 23, 42)
+		}
+		pdf.Ln(2)
+	}
+}
+
+func gradeOrDash(g string) string {
+	if strings.TrimSpace(g) == "" {
+		return "-"
+	}
+	return g
+}
+
+func truncateForPDF(s string, max int) string {
+	s = strings.Join(strings.Fields(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " ")), " ")
+	s = sanitizeForPDF(s)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "..."
+}
+
+func splitPDFLines(s string, maxChars int) []string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = sanitizeForPDF(s)
+	if len(s) > maxChars {
+		s = s[:maxChars] + "\n... (truncated)"
+	}
+	return strings.Split(s, "\n")
+}
+
+func sanitizeForPDF(s string) string {
+	if s == "" {
+		return s
+	}
+	// fpdf core fonts are single-byte; replace common problematic Unicode with ASCII equivalents.
+	repl := strings.NewReplacer(
+		"\u2022", "-", "\u2023", "-", "\u25E6", "-", "\u2043", "-", "\u2219", "-",
+		"\u2013", "-", "\u2014", "-", "\u2212", "-",
+		"\u2018", "'", "\u2019", "'", "\u201A", "'", "\u2032", "'",
+		"\u201C", "\"", "\u201D", "\"", "\u201E", "\"",
+		"\u2026", "...", "\u00A0", " ", "\u2192", "->", "\u2190", "<-", "\u00B7", "-",
+	)
+	s = repl.Replace(s)
+	// Normalize whitespace/control chars and drop other non-Latin-1 runes to avoid garbled output.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20:
+			b.WriteRune(' ')
+		case r <= 0xFF:
+			b.WriteRune(r)
+		default:
+			b.WriteRune('?')
+		}
+	}
+	return b.String()
 }

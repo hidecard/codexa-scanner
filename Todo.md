@@ -74,9 +74,9 @@ For each item, first check the current code and tests, decide whether the work i
 **Review:** Native JSON and CSV exports exist. PDF/branding can improve stakeholder delivery, but is not required to complete security hardening. Build on one shared, versioned report model rather than separate ad-hoc serializers.
 
 - [=] JSON export and port CSV export exist.
-- [~] Define a report data model and output redaction rules before adding formats. Added shared bounded redaction helpers for history targets/results and JSON export (`history.go`, `app.go`) covering embedded URL credentials, sensitive URL query/fragments, and sensitive result keys (password/secret/token/authorization/cookie/credential). Full versioned report schema/redaction policy still pending before new formats (PDF).
-- [ ] Add a branded PDF report with executive summary, technical findings, severity breakdown, risk score, recommendations, metadata, and supported historical comparison.
-- [ ] Test export errors, file permissions, and large reports.
+- [x] Define a report data model and output redaction rules before adding formats. Added shared, versioned report envelope (`reportSchemaVersion`/tool/reportType/generatedAt/metadata/summary/redaction/data/comparison), bounded best-effort redaction policy metadata/scope, and prepared export payloads via `prepareScanReportEnvelope` for JSON/PDF exports.
+- [x] Add a branded PDF report with executive summary, technical findings, severity breakdown, risk score, recommendations, metadata, and supported historical comparison. Implemented `ExportPDF`/`writePDFReport` with branded header, executive summary, severity breakdown, key findings/recommendations, supported comparison rendering, web-audit technical detail, and metadata/redaction section; Web Audit and History (Dashboard/History) now support PDF export.
+- [x] Test export errors, file permissions, and large reports. Added `TestPrepareScanReportEnvelopeRedactsAndAddsModel`, `TestPrepareScanReportEnvelopeSupportsComparisonWrapper`, `TestWritePDFReportCreatesFile`, `TestWritePDFReportHandlesLargeReport`, and `TestExportTextReportsWriteError`; targeted suite and `go test ./ -count=1` pass.
 
 **Not required before Phase 1:** PDF generation, logo design, or duplicating the same data in multiple report-specific models.
 
@@ -116,6 +116,86 @@ For each item, first check the current code and tests, decide whether the work i
 - [ ] Add signing/provenance and release checks if required by the distribution threat model.
 - [-] macOS package/auto-updater — defer until macOS is an explicitly supported target and signing/notarization can be maintained.
 
+## Phase 9 — Modern Stack & Client-Side Exposure Audit (High)
+
+**Review:** Modern and AI-generated ("vibe-coded") web applications frequently expose client-side secrets, source maps, internal API routes, unsafe DOM sinks, or permissive BaaS/CORS configurations. Keep all checks passive or strictly bounded (`HEAD`/capped `GET`), avoid active exploit payloads, redact matched secret values before display or persistence, and report clues rather than attempting exploitation.
+
+- [ ] **P9.1 Client-side JS bundle and secret pattern scanner (passive).** Extract first-party `<script src="...">` URLs from bounded HTML responses and fetch up to a strict file count and byte cap (e.g., max 5 scripts, 512 KiB each) through the existing scoped HTTP client. Match common credential/token patterns (e.g., `sk-proj-`, `sk_live_`, `AIza`, AWS Access Key IDs, Supabase `service_role` JWT clues) using regex and entropy heuristics; display and store only redacted previews (e.g., `sk-proj-****89aB`) with script URL context.
+- [ ] **P9.2 Source map and debug artifact detection.** Inspect fetched JS bundles for trailing `//# sourceMappingURL=...` directives and issue a single bounded `HEAD` check on the resolved same-origin map URL to report whether production source maps are publicly reachable.
+- [ ] **P9.3 Frontend API route and BaaS endpoint extractor.** Parse bounded JS bundles for internal API paths (`/api/...`, `/v1/...`, `/trpc/...`, `/graphql`) and cloud/BaaS host references (`*.supabase.co`, `*.firebaseio.com`, S3 bucket URLs), allowing discovered same-origin routes to be sent directly to Web Audit or Path Discovery.
+- [~] **P9.4 CORS and JWT configuration posture audit.** Implemented passive CORS checks (`Access-Control-Allow-Origin: *`, and high-severity clue for wildcard + `Access-Control-Allow-Credentials: true`) and passive JWT header/payload metadata decoding from observed response headers/cookies to flag `alg:none` or missing `exp`/`nbf` claims without signature verification/brute-forcing; token values are redacted from evidence. Unsafe origin reflection detection remains pending.
+- [~] **P9.5 Framework-specific path discovery presets.** Added curated `HEAD`-only path preset sets in Path Fuzzer UI (Next.js, Vite/SPA, Laravel, Django, Spring, plus general env/VCS/API/debug paths) to help discover common exposure routes within authorized scope.
+- [~] **P9.6 Passive DOM XSS sink and database error disclosure checks.** Implemented passive sampled database error signature detection in HTTP responses (`SQL syntax`, `mysql_fetch`, `PG::SyntaxError`, `ORA-`, `SQLite3::SQLException`, SQLSTATE/PDO/MongoDB clues) as disclosure findings. JS bundle DOM sink scanning (`dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `document.write`, `eval`) with script URL/line context remains pending (depends on bounded JS bundle fetching).
+- [ ] **P9.7 Harmless reflected parameter indicator (passive/non-exploitative).** When an audited URL contains existing query parameters, optionally test whether a benign alphanumeric marker (e.g., `codexa_probe_123`) is echoed unencoded in the HTML body, pairing results with CSP `script-src` and cookie `HttpOnly` posture checks.
+
+## Phase 10 — Authenticated Scope & Engagement Workflow (Medium-High)
+
+**Review:** Authorized security reviews often require inspecting authenticated surfaces, routing traffic through a local inspection proxy, or scanning lab subnets. Every capability in this phase must remain default-off, require explicit per-run scope confirmation, and enforce existing redaction and destination-validation rules.
+
+- [ ] **P10.1 Custom request headers and session context (one-shot scope).** Allow optional custom headers (`Authorization`, `Cookie`, `X-API-Key`) in Web Audit and Path Discovery for authorized authenticated testing; automatically redact header values before SQLite persistence and report export.
+- [ ] **P10.2 Opt-in SOCKS5 / HTTP proxy routing.** Add a default-off, per-scan opt-in proxy setting (e.g., `127.0.0.1:8080` for local traffic inspection tools) while preserving target validation and explicit private-network opt-in checks.
+- [~] **P10.3 Port scanner presets and bounded CIDR subnet sweep.** Added quick port presets in Ports UI (Top 100, Top 1000, Web Ports range, 1–1024). Bounded `/24` CIDR live-host/port sweep with explicit scope confirmation remains pending.
+- [ ] **P10.4 Passive version-to-CVE advisory matcher.** Match observed service banners, `Server`/`X-Powered-By` headers, and generator metadata against a bundled offline advisory dataset to highlight outdated versions with upgrade guidance.
+
+## Phase 11 — Email, Domain & Cloud Posture Hygiene (Medium)
+
+**Review:** Extend existing DNS and TLS modules to parse policy semantics rather than displaying raw records alone, avoiding speculative claims where external confirmation is unavailable.
+
+- [ ] **P11.1 Email security policy parser (SPF, DMARC, DKIM).** Parse existing DNS TXT/SPF/DMARC lookups to flag weak policies (`DMARC p=none`, `SPF +all` or `~all`, missing DMARC record) with concrete remediation guidance.
+- [ ] **P11.2 Subdomain takeover clues (dangling CNAME detector).** Check discovered subdomain CNAME targets against known cloud hosting footprints (GitHub Pages, Heroku, Vercel, Netlify, AWS S3, Azure) and flag unresolved/unclaimed targets as passive takeover indicators for manual verification.
+- [ ] **P11.3 HTTP protocol and TLS 1.2 weak cipher checks.** Report HTTP/2 and HTTP/3 (QUIC) support and flag negotiated or supported legacy TLS 1.2 weak ciphers (CBC, 3DES, RC4, NULL) in TLS Inspector.
+
+## Phase 12 — Operational Efficiency & Consolidated Reporting (Medium)
+
+**Review:** Improve multi-target engagement workflows once the versioned shared report schema (Phase 5) is finalized.
+
+- [ ] **P12.1 Scope file import and exclusion rules.** Support importing target lists (`scope.txt`) and out-of-scope exclusion patterns (`exclude.txt`) so batch URL/port checks skip excluded hosts automatically.
+- [x] **P12.2 Web Audit snapshot diff.** Implemented per-URL Web Audit snapshot persistence (`scan_type="http"`) and `DiffLatestWebAuditScans` to compare latest two snapshots for the same normalized target (grade/risk/status, missing headers, finding IDs, cert-days delta when available) with History UI display.
+- [ ] **P12.3 Multi-target consolidated engagement report.** Group selected history records (subdomains, port scans, web audits, TLS checks) into a single versioned JSON, Markdown, or PDF deliverable using the shared report model.
+- [ ] **P12.4 Safe CLI verification command helper.** Generate copyable, read-only diagnostic commands (`openssl s_client`, `curl -I`, `dig`) from observed findings to assist manual verification in a terminal.
+
+## Phase 13 — Headless CLI & CI/CD Security Gate (Medium)
+
+**Review:** Enable automated security hygiene checks in CI/CD pipelines and terminal workflows using the same backend validation, redaction, and target-policy guardrails as the desktop UI.
+
+- [ ] **P13.1 Headless CLI mode (`--cli` / subcommands).** Allow running Web Audit and bounded checks without launching the Wails GUI (e.g., `codexa-scanner audit --url <target> --fail-on high --json report.json`) with documented exit codes for CI pipelines.
+- [ ] **P13.2 SARIF export format support.** Export Web Audit findings in Static Analysis Results Interchange Format (SARIF) JSON so results integrate directly with GitHub Security alerts and IDE viewers.
+- [ ] **P13.3 User-extensible YAML rule and signature packs.** Support loading local YAML/JSON signature files for custom regex secret patterns, HTTP header rules, and path discovery wordlists without recompiling the binary.
+
+## Phase 14 — Modern API & Cloud Storage Edge Checks (Medium)
+
+**Review:** Add strictly bounded, non-exploitative checks for common API documentation, schema exposure, and cloud storage permissions observed in modern web architectures.
+
+- [ ] **P14.1 GraphQL and OpenAPI introspection clues (bounded).** When `/graphql`, `/swagger.json`, or `/openapi.json` endpoints are detected, perform a bounded metadata check to report whether schema introspection or unauthenticated API specs are publicly exposed.
+- [ ] **P14.2 Public cloud storage bucket exposure clues.** Extract referenced cloud storage URLs (`*.s3.amazonaws.com`, `storage.googleapis.com`, `*.blob.core.windows.net`) from HTML/JS responses and issue a bounded `HEAD`/`GET` check to flag publicly listable bucket metadata (`<ListBucketResult>`).
+- [ ] **P14.3 Rate-limiting and cache-control header audit.** Check API/authentication endpoints for missing rate-limit headers (`X-RateLimit-*`, `Retry-After`) and sensitive responses missing `Cache-Control: no-store`.
+- [ ] **P14.4 Webhook and OAuth redirect URI posture clues.** Flag exposed client-side webhook URLs (Slack, Discord, Telegram) and extract OAuth configuration parameters (`client_id`, `redirect_uri`) from JS bundles for manual review.
+
+## Phase 15 — Tool Interoperability & Deep Inspection (High for Daily Workflow)
+
+**Review:** Real-world assessments combine multiple specialized tools. Support standard import/export formats and raw HTTP/service inspection while preserving non-exploitative boundaries and SSRF/redirect safety controls.
+
+- [ ] **P15.1 External tool output import (Nmap XML & Subdomain TXT).** Import `nmap -oX` XML files to populate open ports and automatically queue discovered HTTP/HTTPS endpoints for Web Audit; support importing newline-delimited subdomain lists from external recon tools (`subfinder`, `amass`) for bulk probing.
+- [ ] **P15.2 Raw HTTP request/response inspector and bounded replay.** Allow inspecting raw request headers, response headers, and bounded response previews for any Web Audit or redirect hop, with an option to replay a single request using modified safe methods (`GET`, `HEAD`, `OPTIONS`) or headers within the existing host/port scope.
+- [ ] **P15.3 Active protocol-specific service fingerprinting.** Extend port-scan banner collection with safe, non-intrusive protocol probes (TLS handshake, HTTP `OPTIONS`, SSH version banner, SMTP `EHLO`, Redis `PING`) to improve service and version identification accuracy.
+- [ ] **P15.4 Passive page form, parameter, and storage surface mapper.** Extract HTML `<form>` actions/methods/input names, URL query parameters, third-party script origins, and JS-referenced `localStorage`/`sessionStorage` keys into a structured attack-surface summary tab to highlight user-input entry points for manual review.
+- [ ] **P15.5 Visual page preview / thumbnail capture for bulk audits.** Capture lightweight headless page previews or DOM layout summaries during bulk Web Audits to help analysts quickly triage login screens, default server pages, and admin portals.
+
+## Phase 16 — Workspace Persistence & Analyst Triage (High for Engagements)
+
+**Review:** Organize multi-target assessment data by engagement workspace in SQLite and support analyst triage annotations without altering raw scan evidence.
+
+- [ ] **P16.1 Project / Engagement workspaces in SQLite.** Add workspace grouping (`workspaces` table + foreign key on scan history) so analysts can isolate targets, subdomains, port scans, and web audits per client or engagement.
+- [ ] **P16.2 Analyst finding status tags and notes.** Allow tagging individual findings (`Verified`, `False Positive`, `Needs Review`, `Accepted Risk`) and attaching analyst notes that persist in SQLite and carry over into Markdown/JSON/PDF reports.
+
+## Phase 17 — Rate Control, Ergonomics & Bilingual Remediation Guide (High)
+
+**Review:** Improve scan pacing, keyboard navigation, and bilingual developer education without adding active exploitation capabilities.
+
+- [ ] **P17.1 Global rate limiter, jitter, and pause/resume controls.** Add configurable requests-per-second (RPS) caps, random jitter delays, and pause/resume lifecycle controls for bulk URL audits and CIDR sweeps to respect target rate limits.
+- [ ] **P17.2 Command palette (`Ctrl+K` / `Cmd+K`) and request profiles.** Add a keyboard-driven command palette for fast navigation across modules, workspaces, and reports, along with selectable User-Agent and timeout presets.
+- [ ] **P17.3 Bilingual (Myanmar / English) deep-dive root-cause & interactive fix guide.** Bundle an embedded (`go:embed`) bilingual knowledge base mapping every finding rule ID to comprehensive English and Myanmar explanations: underlying technical mechanism ("နောက်ကွယ်က အလုပ်လုပ်ပုံ"), common developer mistakes ("ဘာကြောင့် မှားတတ်တာလဲ"), step-by-step attack scenario walkthroughs ("ဘယ်လို တိုက်ခိုက်ခံရနိုင်လဲ"), exact target file path and code location ("ဘယ်နားမှာ ပြင်ရမလဲ"), before/after code diffs ("ဘယ်လို ပြင်ရမလဲ"), deployment actions, and verification instructions across stacks (`Next.js`, `Laravel`, `Express`, `Nginx`, `Apache`, `Supabase`). Auto-select the detected tech stack tab in the finding drawer, include an `EN | မြန်မာ` language toggle, and provide a searchable Security Playbook view.
+
 ## Code organization
 
 - [-] Moving all Go code under a new `internal/` tree is not needed for the current small application. Preserve current modules and tests; revisit when package boundaries enable independent reuse or testing.
@@ -141,3 +221,5 @@ For each item, first check the current code and tests, decide whether the work i
 | 2026-11-17 | Phase 4 Dashboard + logo | Completed. | Added Dashboard tab (default) built from stored/current data: history-backed recent scans and per-record JSON export links, latest port-scan open-port count, latest Web Audit target/risk/severity summary, port-diff context, current-session counts, and empty/loading/error states. Refreshed app branding with new radar-style `frontend/public/logo.svg` + `frontend/public/favicon.svg`, updated header/favicon, and fixed a misplaced Web Audit assessment badge in inspector rendering. `npm run build --prefix frontend` and `git diff --check` passed (LF/CRLF warnings only). Windows packaging icons (`build/appicon.png`, `build/windows/icon.ico`) were not regenerated in this environment because Python/System.Drawing icon generation tools were unavailable. | Phase 4: consider module grouping only if it improves clarity; regenerate platform app icons when a suitable image toolchain is available. |
 | 2026-11-17 | Phase 5/6 redaction + desktop icon | In progress/completed (partial). | Regenerated desktop app icons via PowerShell/System.Drawing (`build/appicon.png`, `build/windows/icon.ico`). Added bounded history/export redaction in `history.go`/`app.go` for embedded URL credentials, sensitive URL query/fragments, and sensitive result keys; updated history/user docs and README. Adjusted tests for new inspector request counts and Windows permission behavior. `go test ./ -count=1` and `npm run build --prefix frontend` passed. | Phase 5: define versioned report data model and redaction policy before PDF; Phase 6: remaining shared export model/comparison work. |
 | 2026-11-17 | Phase 6 history management | Completed (partial scope). | Added `SearchScanHistory`, `DeleteScanHistoryEntry`, `ClearScanHistory` APIs and frontend bindings/UI (search, scan-type filter, delete-one, clear-all with confirmations, empty state, history export of loaded records). Added tests for search/filter/delete/clear and redaction persistence. `go test ./ -count=1`, `go vet ./`, `npm run build --prefix frontend` passed. | Phase 5 next: define versioned shared report data model/redaction policy before adding PDF or new formats. |
+| 2026-11-17 | UI credit, presets, delay, exports, diffs + roadmap | Completed (partial). | Updated UI/README credit to "Developed by H!D3-C4rD" with clickable link to https://arkaryan.net/. Added port scan presets, Web Audit/Path Fuzzer request delay (ms) controls, HTML/Markdown Web Audit summary exports with ExportText backend, per-URL Web Audit snapshot diff (`DiffLatestWebAuditScans`) with History compare UI, and framework path-discovery presets (P9.5 partial). Updated Todo.md with Phase 9–17 roadmap items and marked P9.5/P10.3/P12.2 progress. `go test ./ -count=1`, `go vet ./`, `npm run build --prefix frontend`, `git diff --check` passed (LF/CRLF warnings only). | Next: continue Phase 9 (passive JS/secret/source-map/API extraction with strict bounds and redaction) and Phase 10/11 as prioritized. |
+| 2026-11-17 | Phase 9 passive checks (P9.4/P9.6 partial) | Completed (partial). | Added passive CORS posture clues (wildcard origin info; wildcard + credentials high misconfig clue), passive JWT header/payload metadata decoding for `alg:none`/missing `exp`/`nbf` with redacted evidence, and sampled response DB-error disclosure signature detection in `app.go` with tests. Updated `docs/web-audit.md`, `docs/path-fuzzer.md`, `docs/user-guide.md`, `README.md`, and Todo.md status. `go test ./ -run "TestAuditHTTPResponse|TestGradeFindingsUsesSeverityAndCapsScore" -count=1` and `go test ./ -count=1` passed (prior full run). | Next: P9.1–P9.3 bounded JS bundle fetch/secret-source-map-API extraction via scoped client (max scripts/bytes, same-origin rules, redacted previews only), then DOM sink scan (P9.6 remainder) and unsafe CORS origin reflection (P9.4 remainder). |

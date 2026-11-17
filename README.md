@@ -26,7 +26,9 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
 - Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
-- Native save dialogs for JSON, HTML/Markdown Web Audit summary reports (grade, risk score, findings, remediation), port CSV exports, and history JSON export links. History supports search/filter, per-entry delete, and clear-all with confirmation. Web Audit and port scans can be compared against the previous stored snapshot for the same target. Web Audit and Path Fuzzer support configurable request delay (ms) for rate limiting. Port scanner includes quick presets (Top 100, Top 1000, Web Ports range, 1-1024). Developed by [H!D3-C4rD](https://arkaryan.net/).
+- Web Audit: bounded HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/mixed-content and CSP diagnostics, passive CORS/JWT metadata clues and sampled DB-error disclosure clues (token values redacted), security.txt/robots.txt inspectors, JSON/HTML/Markdown/PDF exports, request delay control, and per-URL snapshot diff.
+- Path Fuzzer: HEAD-only bounded path checks with framework/env/API presets and request delay control.
+- Shared, versioned report model with bounded redaction (credentials/sensitive URL query-fragments/sensitive keys) for persistence and exports.
 - Cross-platform desktop UI powered by Wails.
 
 ## How it works

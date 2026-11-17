@@ -1,13 +1,17 @@
-package main
+﻿package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -115,6 +119,64 @@ func TestAuditHTTPResponseReportsCSPDiagnosticsWithEvidence(t *testing.T) {
 	}
 	if _, ok := byID["csp-missing"]; ok {
 		t.Fatalf("did not expect csp-missing when policy is present: %+v", findings)
+	}
+}
+
+func TestAuditHTTPResponseDetectsCORSMisconfigAndDBError(t *testing.T) {
+	target, _ := url.Parse("https://site.example")
+	resp := &http.Response{
+		Header: http.Header{
+			"Strict-Transport-Security":        []string{"max-age=31536000"},
+			"Content-Security-Policy":          []string{"default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"},
+			"X-Content-Type-Options":           []string{"nosniff"},
+			"Referrer-Policy":                  []string{"strict-origin-when-cross-origin"},
+			"Permissions-Policy":               []string{"camera=()"},
+			"Access-Control-Allow-Origin":      []string{"*"},
+			"Access-Control-Allow-Credentials": []string{"true"},
+		},
+		Request: &http.Request{URL: target},
+	}
+	body := []byte("<html><body>SQLSTATE[42000]: Syntax error or access violation</body></html>")
+	findings := auditHTTPResponse(resp, body)
+	byID := map[string]SecurityFinding{}
+	for _, f := range findings {
+		byID[f.ID] = f
+	}
+	if _, ok := byID["cors-wildcard-credentials"]; !ok {
+		t.Fatalf("expected cors-wildcard-credentials finding, got %+v", findings)
+	}
+	if _, ok := byID["db-error-sqlstate"]; !ok {
+		t.Fatalf("expected db-error-sqlstate finding, got %+v", findings)
+	}
+}
+
+func TestAuditHTTPResponseDetectsJWTAlgNone(t *testing.T) {
+	target, _ := url.Parse("https://site.example")
+	// header: {"alg":"none","typ":"JWT"}, payload: {"sub":"1"}
+	token := "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxIn0."
+	resp := &http.Response{
+		Header: http.Header{
+			"Strict-Transport-Security": []string{"max-age=31536000"},
+			"Content-Security-Policy":   []string{"default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"},
+			"X-Content-Type-Options":    []string{"nosniff"},
+			"Referrer-Policy":           []string{"strict-origin-when-cross-origin"},
+			"Permissions-Policy":        []string{"camera=()"},
+			"Authorization":             []string{"Bearer " + token},
+		},
+		Request: &http.Request{URL: target},
+	}
+	findings := auditHTTPResponse(resp, []byte("<html></html>"))
+	found := false
+	for _, f := range findings {
+		if f.ID == "jwt-alg-none" {
+			found = true
+			if strings.Contains(f.Evidence, token) {
+				t.Fatalf("JWT token value must be redacted from evidence: %+v", f)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected jwt-alg-none finding, got %+v", findings)
 	}
 }
 
@@ -614,7 +676,7 @@ func TestNormalizePortScanTargetRejectsUnsafeOrMalformedInput(t *testing.T) {
 	tests := []string{
 		"", "   ", "https://example.com", "example.com:443", "example.com/path",
 		"[2001:db8::1]:443", "bad..example", "-bad.example", "bad-.example",
-		"192.0.2.999", "127.1", "2130706433", longLabel, "has space.example", "example\n.com", "éxample.com",
+		"192.0.2.999", "127.1", "2130706433", longLabel, "has space.example", "example\n.com", "Ã©xample.com",
 	}
 	for _, target := range tests {
 		t.Run(target, func(t *testing.T) {
@@ -819,5 +881,120 @@ func TestAnalyzeURLReportsMissingSecurityTxtAndRobotsTxt(t *testing.T) {
 	}
 	if result.RobotsTxt == nil || result.RobotsTxt.Found || result.RobotsTxt.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected missing robots.txt inspector result, got %+v", result.RobotsTxt)
+	}
+}
+
+func TestPrepareScanReportEnvelopeRedactsAndAddsModel(t *testing.T) {
+	input := `[{"url":"https://user:pass@example.test/path?token=secret&ok=1","statusCode":200,"grade":"B","riskScore":20,"findings":[{"severity":"high","title":"Test finding","description":"d","recommendation":"Rotate secrets and use HTTPS.","evidence":"Authorization: Bearer abc"}]}]`
+	env, out, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	if err != nil {
+		t.Fatalf("prepareScanReportEnvelope: %v", err)
+	}
+	if env.ReportVersion != reportSchemaVersion || env.Tool != reportGenerator || env.ReportType != "web-audit" {
+		t.Fatalf("unexpected envelope metadata: %+v", env)
+	}
+	if !env.Redaction.Applied || len(env.Redaction.Scope) == 0 {
+		t.Fatalf("expected redaction policy in envelope: %+v", env.Redaction)
+	}
+	if env.Summary == nil || env.Summary.SeverityBreakdown == nil || env.Summary.SeverityBreakdown.High != 1 {
+		t.Fatalf("expected web audit summary with severity breakdown, got %+v", env.Summary)
+	}
+	s := string(out)
+	if strings.Contains(s, "user:pass") || strings.Contains(s, "token=secret") {
+		t.Fatalf("expected sensitive URL values to be redacted in serialized report, got: %s", s)
+	}
+	// evidence is free-text; key-based redaction does not rewrite arbitrary secret-like substrings inside values
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("unmarshal prepared report: %v", err)
+	}
+	if _, ok := decoded["data"]; !ok {
+		t.Fatalf("expected data field in report envelope: %v", decoded)
+	}
+}
+
+func TestPrepareScanReportEnvelopeSupportsComparisonWrapper(t *testing.T) {
+	input := `{"data":[{"url":"https://example.test","statusCode":200,"grade":"A","riskScore":0,"findings":[]}],"comparison":{"target":"https://example.test","note":"ok"},"metadata":{"target":"https://example.test"}}`
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	if err != nil {
+		t.Fatalf("prepareScanReportEnvelope: %v", err)
+	}
+	if env.Comparison == nil {
+		t.Fatalf("expected comparison to be preserved: %+v", env)
+	}
+	if env.Metadata.Target != "https://example.test" {
+		t.Fatalf("expected metadata target, got %+v", env.Metadata)
+	}
+}
+
+func TestWritePDFReportCreatesFile(t *testing.T) {
+	input := `[{"url":"https://example.test","statusCode":200,"grade":"A","riskScore":5,"findings":[{"severity":"info","title":"Note","description":"d","recommendation":"r"}],"error":""}]`
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	if err != nil {
+		t.Fatalf("prepareScanReportEnvelope: %v", err)
+	}
+	env.Comparison = map[string]any{"target": "https://example.test", "gradeChanged": false}
+	path := filepath.Join(t.TempDir(), "report.pdf")
+	if err := writePDFReport(path, env); err != nil {
+		t.Fatalf("writePDFReport: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat pdf: %v", err)
+	}
+	if info.Size() < 500 {
+		t.Fatalf("expected non-trivial PDF output, got %d bytes", info.Size())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read pdf: %v", err)
+	}
+	prefixLen := 4
+	if len(data) < prefixLen {
+		prefixLen = len(data)
+	}
+	if prefixLen < 4 || string(data[:4]) != "%PDF" {
+		t.Fatalf("expected PDF header, got prefix %q", string(data[:prefixLen]))
+	}
+}
+
+func TestWritePDFReportHandlesLargeReport(t *testing.T) {
+	results := make([]map[string]any, 0, 120)
+	for i := 0; i < 120; i++ {
+		findings := make([]map[string]any, 0, 25)
+		for j := 0; j < 25; j++ {
+			findings = append(findings, map[string]any{
+				"severity": "medium", "title": "Finding " + strings.Repeat("x", 20),
+				"description": strings.Repeat("detail ", 20), "recommendation": strings.Repeat("fix ", 20),
+			})
+		}
+		results = append(results, map[string]any{
+			"url": "https://example.test/" + strings.Repeat("p", 10), "statusCode": 200,
+			"grade": "C", "riskScore": 40, "findings": findings,
+		})
+	}
+	raw, _ := json.Marshal(results)
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", string(raw))
+	if err != nil {
+		t.Fatalf("prepareScanReportEnvelope: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "large.pdf")
+	if err := writePDFReport(path, env); err != nil {
+		t.Fatalf("writePDFReport large: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected PDF file for large report: %v", err)
+	}
+}
+
+func TestExportTextReportsWriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory-as-file permission semantics differ on Windows")
+	}
+	dir := t.TempDir()
+	// Passing a directory path as file target should fail.
+	err := os.WriteFile(dir, []byte("x"), 0644)
+	if err == nil {
+		t.Fatal("expected write error when target is a directory")
 	}
 }
