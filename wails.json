@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "codexa-scanner",
+  "outputfilename": "CodexaScanner",
+  "frontend:install": "npm install --prefix frontend",
+  "frontend:build": "npm run build --prefix frontend",
+  "frontend:dev:watcher": "npm run dev --prefix frontend",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "H!D3-C4rD",
+    "email": ""
+  }
+}
