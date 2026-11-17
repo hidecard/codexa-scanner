@@ -1,0 +1,19 @@
+name: codexa-scanner
+arch: amd64
+platform: linux
+version: 1.0.0
+release: 1
+section: utils
+priority: optional
+maintainer: H!D3-C4rD
+description: Codexa Scanner - authorized network and web security assessment desktop tool.
+contents:
+  - src: ./build/bin/CodexaScanner
+    dst: /usr/bin/CodexaScanner
+    file_info:
+      mode: 0755
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.0-37

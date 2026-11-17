@@ -91,6 +91,13 @@ export default function App() {
     return 'bg-rose-950 text-rose-400 border-rose-700';
   };
 
+  const getSeverityColor = (severity: string) => {
+    if (severity === 'critical' || severity === 'high') return 'border-rose-800 bg-rose-950/50 text-rose-300';
+    if (severity === 'medium') return 'border-amber-800 bg-amber-950/40 text-amber-300';
+    if (severity === 'low') return 'border-sky-800 bg-sky-950/40 text-sky-300';
+    return 'border-slate-700 bg-slate-800/50 text-slate-300';
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
       {/* Top Navbar */}
@@ -118,7 +125,7 @@ export default function App() {
               activeTab === 'analyzer' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Bulk HTTP Security Analyzer
+            Passive Web Security Checks
           </button>
         </div>
       </div>
@@ -265,7 +272,7 @@ export default function App() {
                             OPEN
                           </span>
                         </td>
-                        <td className="py-2.5 px-4 text-sky-300">{item.Service || item.service}</td>
+                        <td className="py-2.5 px-4 text-sky-300">{item.service}</td>
                         <td className="py-2.5 px-4 text-slate-300 truncate max-w-md">
                           {item.banner || <span className="text-slate-600">-</span>}
                         </td>
@@ -286,7 +293,7 @@ export default function App() {
         <div className="space-y-4">
           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
             <div className="flex justify-between items-center">
-              <label className="text-xs text-slate-400">Target URLs / Subdomains (One per line)</label>
+              <label className="text-xs text-slate-400">Authorized HTTP/HTTPS URLs (one per line, max 100)</label>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400">Threads:</span>
                 <input
@@ -302,7 +309,7 @@ export default function App() {
               rows={4}
               value={bulkUrls}
               onChange={(e) => setBulkUrls(e.target.value)}
-              placeholder="https://target1.com&#10;https://sub.target2.com"
+              placeholder="https://your-authorized-site.example&#10;http://your-lab-host.example"
               className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs font-mono focus:border-emerald-500 outline-none"
             />
 
@@ -328,7 +335,7 @@ export default function App() {
 
           {/* Results Cards */}
           <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-            {httpResults.map((res, idx) => (
+                {httpResults.map((res, idx) => (
               <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -341,22 +348,68 @@ export default function App() {
                   </div>
                   {!res.error && (
                     <span className={`px-2.5 py-0.5 rounded border text-xs font-bold ${getGradeColor(res.grade)}`}>
-                      Grade: {res.grade}
+                      Grade {res.grade} · Risk {res.riskScore}/100
                     </span>
                   )}
                 </div>
 
                 {res.error ? (
-                  <p className="text-rose-400 text-xs">{res.error}</p>
+                  <>
+                    <p className="text-rose-400 text-xs">{res.error}</p>
+                    {res.findings?.map((finding) => (
+                      <div key={finding.id} className={`rounded-lg border p-3 ${getSeverityColor(finding.severity)}`}>
+                        <div className="flex items-center gap-2 text-xs font-bold uppercase">
+                          <span>{finding.severity}</span><span>{finding.title}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-300">{finding.description}</p>
+                        <p className="mt-1 text-xs text-slate-400">Fix: {finding.recommendation}</p>
+                      </div>
+                    ))}
+                  </>
                 ) : (
                   <>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-400">
                       <span>Title: <strong className="text-slate-200">{res.title || 'N/A'}</strong></span>
                       <span>Server: <strong className="text-amber-300">{res.server || 'Hidden'}</strong></span>
+                      {res.finalUrl && res.finalUrl !== res.url && <span>Final URL: <strong className="text-slate-200">{res.finalUrl}</strong></span>}
                       {res.poweredBy && (
-                        <span>Powered-By: <strong className="text-rose-400">{res.poweredBy} (Leak!)</strong></span>
+                        <span>Powered-By: <strong className="text-amber-300">{res.poweredBy}</strong></span>
                       )}
                     </div>
+
+                    {res.tls && (
+                      <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+                        TLS {res.tls.version} · {res.tls.cipherSuite} · Certificate {res.tls.verified ? 'verified' : 'not verified'} · Expires {new Date(res.tls.expiresAt).toLocaleDateString()} ({res.tls.daysRemaining} days)
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-1.5 text-[10px]">
+                      <span className="text-slate-500">Checked:</span>
+                      {res.present && Object.keys(res.present).map((header) => (
+                        <span key={header} className="rounded border border-emerald-900 bg-emerald-950/50 px-2 py-0.5 text-emerald-300">{header}</span>
+                      ))}
+                      {res.missing?.map((header) => (
+                        <span key={header} className="rounded border border-rose-900 bg-rose-950/40 px-2 py-0.5 text-rose-300">Missing: {header}</span>
+                      ))}
+                    </div>
+
+                    {res.findings?.length ? (
+                      <div className="space-y-2 pt-1">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Passive findings ({res.findings.length})</div>
+                        {res.findings.map((finding) => (
+                          <div key={finding.id} className={`rounded-lg border p-3 ${getSeverityColor(finding.severity)}`}>
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase">
+                              <span>{finding.severity}</span><span>{finding.title}</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-300">{finding.description}</p>
+                            {finding.evidence && <p className="mt-1 break-all text-[11px] text-slate-400">Evidence: {finding.evidence}</p>}
+                            <p className="mt-1 text-xs text-slate-400">Fix: {finding.recommendation}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-emerald-400">No issues found by these passive checks. This is not proof that the site is vulnerability-free.</p>
+                    )}
 
                     {res.missing && res.missing.length > 0 && (
                       <div className="pt-1 flex flex-wrap gap-1.5">

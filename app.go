@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -185,24 +188,52 @@ func (a *App) StopPortScan() {
 
 type BulkHeaderResult struct {
 	URL        string            `json:"url"`
+	FinalURL   string            `json:"finalUrl"`
 	StatusCode int               `json:"statusCode"`
 	Title      string            `json:"title"`
 	Server     string            `json:"server"`
 	PoweredBy  string            `json:"poweredBy"`
 	Grade      string            `json:"grade"`
+	RiskScore  int               `json:"riskScore"`
 	Missing    []string          `json:"missing"`
 	Present    map[string]string `json:"present"`
+	TLS        *TLSDetails       `json:"tls,omitempty"`
+	Findings   []SecurityFinding `json:"findings"`
 	Error      string            `json:"error"`
 }
 
+type TLSDetails struct {
+	Version       string    `json:"version"`
+	CipherSuite   string    `json:"cipherSuite"`
+	Subject       string    `json:"subject"`
+	Issuer        string    `json:"issuer"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+	DaysRemaining int       `json:"daysRemaining"`
+	Verified      bool      `json:"verified"`
+}
+
+type SecurityFinding struct {
+	ID             string `json:"id"`
+	Severity       string `json:"severity"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Recommendation string `json:"recommendation"`
+	Evidence       string `json:"evidence,omitempty"`
+}
+
 var titleRegex = regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
+var mixedContentRegex = regexp.MustCompile(`(?i)(?:src|poster)\s*=\s*["']http://`)
 
 func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResult {
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
+	scanner.Buffer(make([]byte, 1024), 64*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
+			if len(urls) >= 100 {
+				break
+			}
 			urls = append(urls, line)
 		}
 	}
@@ -213,12 +244,18 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 	if concurrency <= 0 {
 		concurrency = 10
 	}
+	if concurrency > 20 {
+		concurrency = 20
+	}
 
 	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
 		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			return nil
+		},
 	}
 
 	secHeaders := []string{
@@ -240,72 +277,185 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int) []BulkHeaderResu
 		go func(i int, target string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-				target = "https://" + target
-			}
-
-			req, err := http.NewRequest("GET", target, nil)
-			if err != nil {
-				results[i] = BulkHeaderResult{URL: target, Error: err.Error()}
-				return
-			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NetRecon/2.0")
-
-			resp, err := client.Do(req)
-			if err != nil {
-				results[i] = BulkHeaderResult{URL: target, Error: "Connection failed / Timeout"}
-				return
-			}
-			defer resp.Body.Close()
-
-			// HTML Title ဆွဲထုတ်ရန် Body အစပိုင်း 32KB လောက်ပဲ ဖတ်မယ် (Memory သက်သာအောင်)
-			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 32768))
-			title := ""
-			if matches := titleRegex.FindStringSubmatch(string(bodyBytes)); len(matches) > 1 {
-				title = strings.TrimSpace(matches[1])
-			}
-
-			var missing []string
-			present := make(map[string]string)
-
-			for _, h := range secHeaders {
-				val := resp.Header.Get(h)
-				if val == "" {
-					missing = append(missing, h)
-				} else {
-					present[h] = val
-				}
-			}
-
-			// Security Grade တွက်ချက်ခြင်း
-			grade := "A"
-			switch len(missing) {
-			case 0:
-				grade = "A+"
-			case 1, 2:
-				grade = "B"
-			case 3, 4:
-				grade = "C"
-			default:
-				grade = "F"
-			}
-
-			results[i] = BulkHeaderResult{
-				URL:        target,
-				StatusCode: resp.StatusCode,
-				Title:      title,
-				Server:     resp.Header.Get("Server"),
-				PoweredBy:  resp.Header.Get("X-Powered-By"),
-				Grade:      grade,
-				Missing:    missing,
-				Present:    present,
-			}
+			results[i] = analyzeURL(target, client, secHeaders)
 		}(idx, rawURL)
 	}
 
 	wg.Wait()
 	return results
+}
+
+func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHeaderResult {
+	inputURL := strings.TrimSpace(target)
+	if !strings.Contains(inputURL, "://") {
+		inputURL = "https://" + inputURL
+	}
+	parsed, err := url.Parse(inputURL)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		return BulkHeaderResult{URL: inputURL, Error: "Enter a valid http:// or https:// URL without embedded credentials."}
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return BulkHeaderResult{URL: inputURL, Error: "Enter a valid http:// or https:// URL without embedded credentials."}
+	}
+	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Present: make(map[string]string), Findings: []SecurityFinding{}}
+	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		result.Error = "Invalid URL."
+		return result
+	}
+	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Error = "Connection failed, timed out, or TLS certificate verification failed. No insecure TLS bypass was used."
+		var certErr x509.UnknownAuthorityError
+		var hostnameErr x509.HostnameError
+		var invalidErr x509.CertificateInvalidError
+		switch {
+		case errors.As(err, &certErr):
+			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-untrusted", Severity: "high", Title: "TLS certificate is not trusted", Description: "The system trust store rejected the remote certificate.", Recommendation: "Install a certificate issued by a trusted CA and serve the complete certificate chain."})
+		case errors.As(err, &hostnameErr):
+			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-hostname", Severity: "high", Title: "TLS certificate hostname mismatch", Description: "The certificate does not match the requested hostname.", Recommendation: "Issue and serve a certificate whose subject alternative names include this hostname."})
+		case errors.As(err, &invalidErr):
+			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-invalid", Severity: "high", Title: "TLS certificate is invalid", Description: "The system trust store rejected the certificate validity or constraints.", Recommendation: "Renew or correctly configure the certificate and its chain."})
+		}
+		result.RiskScore, result.Grade = gradeFindings(result.Findings)
+		return result
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	result.FinalURL = resp.Request.URL.String()
+	result.StatusCode = resp.StatusCode
+	if matches := titleRegex.FindSubmatch(bodyBytes); len(matches) > 1 {
+		result.Title = strings.TrimSpace(string(matches[1]))
+	}
+	result.Server = resp.Header.Get("Server")
+	result.PoweredBy = resp.Header.Get("X-Powered-By")
+	for _, h := range secHeaders {
+		if value := resp.Header.Get(h); value == "" {
+			result.Missing = append(result.Missing, h)
+		} else {
+			result.Present[h] = value
+		}
+	}
+	result.Findings = auditHTTPResponse(resp, bodyBytes)
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		cert := resp.TLS.PeerCertificates[0]
+		days := int(time.Until(cert.NotAfter).Hours() / 24)
+		result.TLS = &TLSDetails{Version: tlsVersionName(resp.TLS.Version), CipherSuite: tls.CipherSuiteName(resp.TLS.CipherSuite), Subject: cert.Subject.CommonName, Issuer: cert.Issuer.CommonName, ExpiresAt: cert.NotAfter, DaysRemaining: days, Verified: len(resp.TLS.VerifiedChains) > 0}
+		if days <= 30 {
+			severity := "medium"
+			if days <= 7 {
+				severity = "high"
+			}
+			result.Findings = append(result.Findings, SecurityFinding{ID: "tls-expiring", Severity: severity, Title: "TLS certificate expires soon", Description: fmt.Sprintf("The verified certificate expires in %d day(s).", days), Recommendation: "Renew the certificate before its expiry and verify automated renewal."})
+		}
+	}
+	result.RiskScore, result.Grade = gradeFindings(result.Findings)
+	return result
+}
+
+func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
+	findings := make([]SecurityFinding, 0, 12)
+	add := func(id, severity, title, description, recommendation, evidence string) {
+		findings = append(findings, SecurityFinding{ID: id, Severity: severity, Title: title, Description: description, Recommendation: recommendation, Evidence: evidence})
+	}
+	secure := resp.Request != nil && resp.Request.URL.Scheme == "https"
+	if !secure {
+		add("https-not-enforced", "high", "Page is served over plain HTTP", "The final page URL is not protected by HTTPS; network observers may read or alter traffic.", "Enable HTTPS with a valid certificate and redirect HTTP requests to HTTPS.", resp.Request.URL.String())
+	} else if resp.Header.Get("Strict-Transport-Security") == "" {
+		add("hsts-missing", "medium", "HSTS header is missing", "HTTPS responses do not instruct browsers to prefer secure transport on future visits.", "After confirming HTTPS works for all subdomains, set an appropriate Strict-Transport-Security max-age and consider includeSubDomains.", "Strict-Transport-Security absent")
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		add("csp-missing", "medium", "Content Security Policy is missing", "No CSP was observed in the response; this removes a browser-side mitigation against injected content.", "Define a restrictive Content-Security-Policy based on the site's required resources; test in report-only mode first.", "Content-Security-Policy absent")
+	}
+	csp := strings.ToLower(resp.Header.Get("Content-Security-Policy"))
+	if resp.Header.Get("X-Frame-Options") == "" && !strings.Contains(csp, "frame-ancestors") {
+		add("clickjacking-protection-missing", "medium", "Clickjacking protection is missing", "Neither X-Frame-Options nor CSP frame-ancestors was observed.", "Set Content-Security-Policy frame-ancestors; use X-Frame-Options for legacy browser support if needed.", "No frame-ancestors or X-Frame-Options")
+	}
+	if !strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Content-Type-Options")), "nosniff") {
+		add("nosniff-missing", "low", "MIME sniffing protection is missing", "X-Content-Type-Options is absent or is not set to nosniff.", "Set X-Content-Type-Options: nosniff and serve accurate Content-Type values.", resp.Header.Get("X-Content-Type-Options"))
+	}
+	if resp.Header.Get("Referrer-Policy") == "" {
+		add("referrer-policy-missing", "low", "Referrer-Policy is missing", "The response does not define a referrer policy.", "Set a policy such as strict-origin-when-cross-origin, adjusted to application requirements.", "Referrer-Policy absent")
+	}
+	if resp.Header.Get("Permissions-Policy") == "" {
+		add("permissions-policy-missing", "info", "Permissions-Policy is missing", "No browser feature policy was observed.", "Consider disabling browser features the application does not need.", "Permissions-Policy absent")
+	}
+	for cookieIndex, cookie := range resp.Cookies() {
+		findingSuffix := fmt.Sprintf("-%d", cookieIndex+1)
+		if !cookie.Secure {
+			severity := "medium"
+			if !secure {
+				severity = "high"
+			}
+			add("cookie-secure-missing"+findingSuffix, severity, "Cookie lacks Secure attribute", "A Set-Cookie value was returned without the Secure flag.", "Set Secure on cookies intended for HTTPS-only delivery.", cookie.Name)
+		}
+		if !cookie.HttpOnly {
+			add("cookie-httponly-missing"+findingSuffix, "low", "Cookie lacks HttpOnly attribute", "A Set-Cookie value was returned without HttpOnly; client-side scripts may be able to read it.", "Set HttpOnly unless browser-side access is explicitly required.", cookie.Name)
+		}
+		if cookie.SameSite == 0 {
+			add("cookie-samesite-missing"+findingSuffix, "low", "Cookie lacks an explicit SameSite policy", "A Set-Cookie value did not specify SameSite.", "Choose an explicit SameSite policy (Lax or Strict where compatible; None requires Secure).", cookie.Name)
+		}
+	}
+	if secure && mixedContentRegex.Match(body) {
+		add("mixed-content-reference", "medium", "HTTPS page references an HTTP resource", "The sampled HTML contains a resource src/poster URL using plain HTTP.", "Load active resources over HTTPS or remove the insecure reference.", "HTTP resource URL found in first 64 KiB of response")
+	}
+	if resp.Header.Get("X-Powered-By") != "" || resp.Header.Get("Server") != "" {
+		evidence := strings.TrimSpace(resp.Header.Get("Server") + " " + resp.Header.Get("X-Powered-By"))
+		add("technology-disclosure", "info", "Server technology headers are exposed", "Response headers disclose implementation details that may help fingerprint the stack.", "Remove unnecessary product/version tokens; this is informational and is not proof of a vulnerability.", evidence)
+	}
+	return findings
+}
+
+func gradeFindings(findings []SecurityFinding) (int, string) {
+	score := 0
+	for _, finding := range findings {
+		switch finding.Severity {
+		case "critical":
+			score += 40
+		case "high":
+			score += 25
+		case "medium":
+			score += 15
+		case "low":
+			score += 5
+		default:
+			score++
+		}
+	}
+	if score > 100 {
+		score = 100
+	}
+	switch {
+	case score == 0:
+		return score, "A+"
+	case score <= 10:
+		return score, "A"
+	case score <= 25:
+		return score, "B"
+	case score <= 50:
+		return score, "C"
+	case score <= 75:
+		return score, "D"
+	default:
+		return score, "F"
+	}
+}
+
+func tlsVersionName(v uint16) string {
+	switch v {
+	case tls.VersionTLS10:
+		return "TLS 1.0"
+	case tls.VersionTLS11:
+		return "TLS 1.1"
+	case tls.VersionTLS12:
+		return "TLS 1.2"
+	case tls.VersionTLS13:
+		return "TLS 1.3"
+	default:
+		return "Unknown"
+	}
 }
 
 // ==========================================
@@ -364,4 +514,3 @@ func (a *App) ExportPortsCSV(findings []PortFinding) (string, error) {
 
 	return path, nil
 }
-
