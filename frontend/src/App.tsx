@@ -598,6 +598,21 @@ export default function App() {
                         <span>Powered-By: <strong className="text-amber-300">{res.poweredBy}</strong></span>
                       )}
                     </div>
+                    {res.redirects?.length > 0 && (
+                      <details className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-slate-300">Redirect chain ({res.redirects.length} hop{res.redirects.length === 1 ? '' : 's'})</summary>
+                        <div className="mt-2 space-y-2">
+                          {res.redirects.map((hop, hopIndex) => (
+                            <div key={`${hop.from}-${hop.to}-${hopIndex}`} className="rounded border border-slate-800 px-2 py-2 text-[11px]">
+                              <div className="text-amber-300">HTTP {hop.statusCode || 'redirect'}</div>
+                              <div className="break-all text-slate-400">{hop.from}</div>
+                              <div className="text-slate-600">↓</div>
+                              <div className="break-all text-slate-200">{hop.to}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
 
                     {(res.technologies?.length || res.edgeServices?.length) ? (
                       <div className="flex flex-wrap gap-1.5 text-[10px]">

@@ -423,6 +423,7 @@ func (a *App) StopPortScan() {
 type BulkHeaderResult struct {
 	URL          string            `json:"url"`
 	FinalURL     string            `json:"finalUrl"`
+	Redirects    []RedirectHop     `json:"redirects,omitempty"`
 	StatusCode   int               `json:"statusCode"`
 	Title        string            `json:"title"`
 	Server       string            `json:"server"`
@@ -436,6 +437,12 @@ type BulkHeaderResult struct {
 	TLS          *TLSDetails       `json:"tls,omitempty"`
 	Findings     []SecurityFinding `json:"findings"`
 	Error        string            `json:"error"`
+}
+
+type RedirectHop struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	StatusCode int    `json:"statusCode"`
 }
 
 type TLSDetails struct {
@@ -506,7 +513,7 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 			client, err := newScopedHTTPClient(target, allowPrivateTargets, net.DefaultResolver)
 			if err != nil {
 				inputURL := analysisURLForDisplay(target)
-				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Error: err.Error()}
+				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Redirects: []RedirectHop{}, Error: err.Error()}
 				return
 			}
 			results[i] = analyzeURL(target, client, secHeaders)
@@ -524,9 +531,9 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHeaderResult {
 	inputURL, parsed, _, err := parseHTTPAnalysisURL(target)
 	if err != nil {
-		return BulkHeaderResult{URL: inputURL, Error: err.Error()}
+		return BulkHeaderResult{URL: inputURL, Redirects: []RedirectHop{}, Error: err.Error()}
 	}
-	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Present: make(map[string]string), Findings: []SecurityFinding{}}
+	result := BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Redirects: []RedirectHop{}, Present: make(map[string]string), Findings: []SecurityFinding{}}
 	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		result.Error = "Invalid URL."
@@ -534,6 +541,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	}
 	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
 	resp, err := client.Do(req)
+	result.Redirects = snapshotRedirectHops(client)
 	if err != nil {
 		result.Error = httpAnalysisErrorMessage(err)
 		var certErr x509.UnknownAuthorityError

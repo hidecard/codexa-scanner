@@ -20,6 +20,47 @@ const (
 	httpDNSLookupTimeout = 5 * time.Second
 )
 
+type redirectTraceTransport struct {
+	base http.RoundTripper
+	mu   sync.Mutex
+	hops []RedirectHop
+}
+
+func (t *redirectTraceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp == nil || req.URL == nil || resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
+		return resp, err
+	}
+	location, locationErr := resp.Location()
+	if locationErr != nil || location == nil {
+		return resp, err
+	}
+	target := req.URL.ResolveReference(location)
+	t.mu.Lock()
+	t.hops = append(t.hops, RedirectHop{From: req.URL.String(), To: target.String(), StatusCode: resp.StatusCode})
+	t.mu.Unlock()
+	return resp, err
+}
+
+func (t *redirectTraceTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+func snapshotRedirectHops(client *http.Client) []RedirectHop {
+	if client == nil {
+		return []RedirectHop{}
+	}
+	trace, ok := client.Transport.(*redirectTraceTransport)
+	if !ok || trace == nil {
+		return []RedirectHop{}
+	}
+	trace.mu.Lock()
+	defer trace.mu.Unlock()
+	return append([]RedirectHop{}, trace.hops...)
+}
+
 var (
 	errHTTPRedirectOutOfScope = errors.New("redirect is outside the selected target scope")
 	errHTTPRedirectDowngrade  = errors.New("HTTPS-to-HTTP redirects are not allowed")
@@ -303,9 +344,10 @@ func newScopedHTTPClient(target string, allowPrivate bool, lookup httpIPLookup) 
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), requestPort))
 		},
 	}
+	traceTransport := &redirectTraceTransport{base: transport, hops: []RedirectHop{}}
 	return &http.Client{
 		Timeout:   10 * time.Second,
-		Transport: transport,
+		Transport: traceTransport,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			return validateHTTPRedirect(request, via, scope)
 		},

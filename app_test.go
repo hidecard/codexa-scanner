@@ -365,7 +365,8 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.CloseIdleConnections()
-	transport := client.Transport.(*http.Transport)
+	trace := client.Transport.(*redirectTraceTransport)
+	transport := trace.base.(*http.Transport)
 	if transport.Proxy != nil {
 		t.Fatal("scoped transport must not use ambient proxies")
 	}
@@ -373,6 +374,9 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 	result := analyzeURL(serverURL.String(), client, nil)
 	if result.Error != "" || result.StatusCode != http.StatusOK {
 		t.Fatalf("expected redirect to use pinned loopback address, got %+v", result)
+	}
+	if len(result.Redirects) != 1 || result.Redirects[0].StatusCode != http.StatusFound || !strings.HasSuffix(result.Redirects[0].To, "/final") {
+		t.Fatalf("expected one recorded redirect hop, got %+v", result.Redirects)
 	}
 	if got := lookup.lookupCount(); got != 1 {
 		t.Fatalf("expected hostname to resolve once across redirect chain, got %d lookups", got)

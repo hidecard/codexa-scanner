@@ -65,9 +65,27 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class RedirectHop {
+	    from: string;
+	    to: string;
+	    statusCode: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RedirectHop(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.statusCode = source["statusCode"];
+	    }
+	}
+
 	export class BulkHeaderResult {
 	    url: string;
 	    finalUrl: string;
+	    redirects: RedirectHop[];
 	    statusCode: number;
 	    title: string;
 	    server: string;
@@ -90,6 +108,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
 	        this.finalUrl = source["finalUrl"];
+	        this.redirects = this.convertValues(source["redirects"], RedirectHop);
 	        this.statusCode = source["statusCode"];
 	        this.title = source["title"];
 	        this.server = source["server"];
