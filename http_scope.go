@@ -16,9 +16,48 @@ import (
 )
 
 const (
-	maxHTTPRedirects     = 5
-	httpDNSLookupTimeout = 5 * time.Second
+	maxHTTPRedirects       = 5
+	httpDNSLookupTimeout   = 5 * time.Second
+	defaultHTTPUserAgent   = "Codexa-Scanner/1.1 (passive authorized security assessment)"
+	defaultHTTPDialTimeout = 5 * time.Second
+	defaultHTTPTimeout     = 10 * time.Second
 )
+
+type HTTPRequestProfile struct {
+	UserAgent      string `json:"userAgent"`
+	TimeoutSeconds int    `json:"timeoutSeconds"`
+}
+
+func resolveHTTPRequestProfile(profile HTTPRequestProfile) HTTPRequestProfile {
+	ua := strings.TrimSpace(profile.UserAgent)
+	if ua == "" {
+		ua = defaultHTTPUserAgent
+	}
+	// keep User-Agent bounded/safe for headers
+	ua = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, ua)
+	if len(ua) > 200 {
+		ua = ua[:200]
+	}
+	t := profile.TimeoutSeconds
+	switch t {
+	case 0:
+		t = 10
+	case 5, 10, 20, 30:
+	default:
+		if t < 3 {
+			t = 3
+		}
+		if t > 60 {
+			t = 60
+		}
+	}
+	return HTTPRequestProfile{UserAgent: ua, TimeoutSeconds: t}
+}
 
 type redirectTraceTransport struct {
 	base http.RoundTripper
@@ -307,6 +346,10 @@ func validateHTTPRedirect(request *http.Request, via []*http.Request, scope http
 }
 
 func newScopedHTTPClient(target string, allowPrivate bool, lookup httpIPLookup) (*http.Client, error) {
+	return newScopedHTTPClientWithProfile(target, allowPrivate, lookup, HTTPRequestProfile{})
+}
+
+func newScopedHTTPClientWithProfile(target string, allowPrivate bool, lookup httpIPLookup, profile HTTPRequestProfile) (*http.Client, error) {
 	_, parsed, host, err := parseHTTPAnalysisURL(target)
 	if err != nil {
 		return nil, err
@@ -315,8 +358,13 @@ func newScopedHTTPClient(target string, allowPrivate bool, lookup httpIPLookup) 
 	if err != nil {
 		return nil, err
 	}
+	prof := resolveHTTPRequestProfile(profile)
+	dialTimeout := defaultHTTPDialTimeout
+	if time.Duration(prof.TimeoutSeconds)*time.Second < dialTimeout {
+		dialTimeout = time.Duration(prof.TimeoutSeconds) * time.Second
+	}
 	pinned := newPinnedHTTPResolver(lookup, allowPrivate)
-	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
 		// An ambient proxy could resolve the hostname elsewhere and bypass our pins.
 		Proxy: nil,
@@ -346,12 +394,16 @@ func newScopedHTTPClient(target string, allowPrivate bool, lookup httpIPLookup) 
 	}
 	traceTransport := &redirectTraceTransport{base: transport, hops: []RedirectHop{}}
 	return &http.Client{
-		Timeout:   10 * time.Second,
+		Timeout:   time.Duration(prof.TimeoutSeconds) * time.Second,
 		Transport: traceTransport,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			return validateHTTPRedirect(request, via, scope)
 		},
 	}, nil
+}
+
+func (p HTTPRequestProfile) resolvedUserAgent() string {
+	return resolveHTTPRequestProfile(p).UserAgent
 }
 
 func httpAnalysisErrorMessage(err error) string {

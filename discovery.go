@@ -235,71 +235,56 @@ func (a *App) EnumerateSubdomains(domain string, wordlist []string, brute bool) 
 }
 
 // FuzzPaths sends bounded HEAD requests only; it never reads response bodies. Redirects are disabled.
-func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int) PathFuzzResult {
+func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int) PathFuzzResult {
 	u, err := validateDiscoveryURL(baseURL)
 	r := PathFuzzResult{BaseURL: baseURL, Paths: []PathFinding{}}
-	if err != nil {
-		r.Error = err.Error()
-		return r
-	}
-	if concurrency < 1 {
-		concurrency = 5
-	}
-	if concurrency > discoveryWorkers {
-		concurrency = discoveryWorkers
-	}
-	if requestDelayMs < 0 {
-		requestDelayMs = 0
-	}
-	if requestDelayMs > 5000 {
-		requestDelayMs = 5000
-	}
+	if err != nil { r.Error = err.Error(); return r }
+	if concurrency < 1 { concurrency = 5 }
+	if concurrency > discoveryWorkers { concurrency = discoveryWorkers }
+	if requestDelayMs < 0 { requestDelayMs = 0 }
+	if requestDelayMs > 5000 { requestDelayMs = 5000 }
+	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
+	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds})
+	ua := profile.UserAgent
 	clean := make([]string, 0, min(len(paths), discoveryLimit))
 	seen := map[string]bool{}
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
-		if !validFuzzPath(p) || seen[p] {
-			continue
-		}
+		if !validFuzzPath(p) || seen[p] { continue }
 		seen[p] = true
 		clean = append(clean, p)
-		if len(clean) >= discoveryLimit {
-			break
-		}
+		if len(clean) >= discoveryLimit { break }
 	}
-	client := &http.Client{Timeout: 4 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	// Use a random-looking missing resource to identify generic catch-all responses, using HEAD only.
-	baselineStatus := 0
-	baselineLength := int64(-1)
+	client := &http.Client{Timeout: time.Duration(profile.TimeoutSeconds) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	baselineStatus, baselineLength := 0, int64(-1)
 	if req, e := http.NewRequest(http.MethodHead, joinFuzzURL(u, "/__codexa_missing_probe_7f31d9"), nil); e == nil {
-		if resp, e := client.Do(req); e == nil {
-			baselineStatus = resp.StatusCode
-			baselineLength = resp.ContentLength
-			resp.Body.Close()
-		}
+		req.Header.Set("User-Agent", ua)
+		if resp, e := client.Do(req); e == nil { baselineStatus = resp.StatusCode; baselineLength = resp.ContentLength; resp.Body.Close() }
 	}
 	sem := make(chan struct{}, concurrency)
 	results := make([]PathFinding, len(clean))
 	keep := make([]bool, len(clean))
 	var wg sync.WaitGroup
+	ctx := a.ctx
+	if ctx == nil { ctx = context.Background() }
+	var gateMu sync.Mutex
+	var last time.Time
+	nextSlot := func() bool { gateMu.Lock(); defer gateMu.Unlock(); t, ok := a.waitForRateSlot(ctx, last, rate); last = t; return ok }
 	for i, p := range clean {
-		wg.Add(1)
-		sem <- struct{}{}
+		if ctx.Err() != nil { break }
+		wg.Add(1); sem <- struct{}{}
 		go func(i int, p string) {
-			defer wg.Done()
-			defer func() { <-sem }()
+			defer wg.Done(); defer func() { <-sem }()
+			if !nextSlot() { return }
 			if requestDelayMs > 0 {
-				time.Sleep(time.Duration(requestDelayMs) * time.Millisecond)
+				select { case <-ctx.Done(): return; case <-time.After(time.Duration(requestDelayMs) * time.Millisecond): }
 			}
 			target := joinFuzzURL(u, p)
 			req, e := http.NewRequest(http.MethodHead, target, nil)
-			if e != nil {
-				return
-			}
+			if e != nil { return }
+			req.Header.Set("User-Agent", ua)
 			resp, e := client.Do(req)
-			if e != nil {
-				return
-			}
+			if e != nil { return }
 			resp.Body.Close()
 			if isInterestingPathStatus(resp.StatusCode) && !isGenericNotFound(resp.StatusCode, resp.ContentLength, baselineStatus, baselineLength) {
 				results[i] = PathFinding{URL: target, StatusCode: resp.StatusCode, ContentLength: resp.ContentLength}
@@ -308,11 +293,7 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 		}(i, p)
 	}
 	wg.Wait()
-	for i := range results {
-		if keep[i] {
-			r.Paths = append(r.Paths, results[i])
-		}
-	}
+	for i := range results { if keep[i] { r.Paths = append(r.Paths, results[i]) } }
 	_ = a.saveHistory("fuzzer", u.String(), r)
 	return r
 }

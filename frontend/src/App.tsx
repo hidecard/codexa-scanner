@@ -17,11 +17,16 @@ import {
   DiffLatestWebAuditScans,
   DeleteScanHistoryEntry,
   ClearScanHistory,
+  GetRemediationKnowledge,
+  PauseScans,
+  ResumeScans,
+  IsScansPaused,
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
-type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history';
+type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook';
+type GuideLang = 'en' | 'my';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -76,6 +81,23 @@ export default function App() {
   const [isHistoryBusy, setIsHistoryBusy] = useState(false);
   const [historyError, setHistoryError] = useState('');
 
+  // Phase 17
+  const [httpRps, setHttpRps] = useState(0);
+  const [httpJitterMs, setHttpJitterMs] = useState(0);
+  const [fuzzRps, setFuzzRps] = useState(0);
+  const [fuzzJitterMs, setFuzzJitterMs] = useState(0);
+  const [requestUserAgent, setRequestUserAgent] = useState('');
+  const [requestTimeout, setRequestTimeout] = useState(10);
+  const [isPaused, setIsPaused] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [remediationKB, setRemediationKB] = useState<any | null>(null);
+  const [playbookLang, setPlaybookLang] = useState<GuideLang>('en');
+  const [playbookStack, setPlaybookStack] = useState('Next.js');
+  const [playbookQuery, setPlaybookQuery] = useState('');
+  const [findingDrawerId, setFindingDrawerId] = useState<string | null>(null);
+  const [detectedTechStack, setDetectedTechStack] = useState('Next.js');
+
   const errorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error) return error;
@@ -94,6 +116,7 @@ export default function App() {
 
     EventsOn('scan:done', (status: string) => {
       setIsScanning(false);
+      setIsPaused(false);
       if (status === 'completed') {
         setProgress(100);
       } else if (status === 'cancelled') {
@@ -105,6 +128,7 @@ export default function App() {
     });
     EventsOn('scan:target', (address: string) => setResolvedScanTarget(address));
     EventsOn('scan:error', (message: string) => setScanError(message));
+    EventsOn('scan:control', (state: string) => setIsPaused(state === 'paused'));
 
     return () => {
       EventsOff('port:found');
@@ -112,8 +136,54 @@ export default function App() {
       EventsOff('scan:done');
       EventsOff('scan:target');
       EventsOff('scan:error');
+      EventsOff('scan:control');
     };
   }, []);
+
+  useEffect(() => {
+    void (async () => { try { setRemediationKB(await GetRemediationKnowledge()); } catch {} })();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setCommandPaletteOpen(v => !v); setPaletteQuery(''); }
+      if (e.key === 'Escape') { setCommandPaletteOpen(false); setFindingDrawerId(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const togglePause = async () => {
+    try { if (isPaused) { await ResumeScans(); setIsPaused(false); } else { await PauseScans(); setIsPaused(true); } } catch {}
+  };
+  const detectStackFromResult = (res?: main.BulkHeaderResult | null) => {
+    const techs = ((res?.technologies || []).concat(res?.edgeServices || [])).map(t => (t || '').toLowerCase()).join(' ');
+    if (techs.includes('next')) return 'Next.js';
+    if (techs.includes('laravel') || techs.includes('php')) return 'Laravel';
+    if (techs.includes('express') || techs.includes('node')) return 'Express';
+    if (techs.includes('nginx')) return 'Nginx';
+    if (techs.includes('apache')) return 'Apache';
+    if (techs.includes('supabase')) return 'Supabase';
+    return 'Next.js';
+  };
+  const openFindingGuide = (id: string, res?: main.BulkHeaderResult | null) => {
+    const stack = detectStackFromResult(res);
+    setDetectedTechStack(stack); setPlaybookStack(stack); setFindingDrawerId(id);
+  };
+  const lookupGuide = (id: string | null) => {
+    if (!id || !remediationKB?.entries) return null;
+    const entries = remediationKB.entries as any[];
+    let e = entries.find((x: any) => x.id === id);
+    if (!e) {
+      const prefixes = ['client-secret-pattern-', 'cookie-secure-missing', 'cookie-httponly-missing', 'cookie-samesite-missing', 'db-error-'];
+      const p = prefixes.find(px => id.startsWith(px));
+      if (p) e = entries.find((x: any) => x.id === p);
+    }
+    if (!e) e = entries.find((x: any) => x.id === 'generic-finding');
+    return e || null;
+  };
+  const guideText = (obj: any, key: string) => (obj?.[key]?.[playbookLang] || obj?.[key]?.en || '');
+  const guideList = (obj: any, key: string): string[] => (obj?.[key]?.[playbookLang] || obj?.[key]?.en || []);
 
   const handleStartScan = async () => {
     const confirmedScope = scopeConfirmed;
@@ -159,7 +229,7 @@ export default function App() {
     setHttpResults([]);
     setHttpError('');
     try {
-      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs));
+      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs), Number(httpRps), Number(httpJitterMs), requestUserAgent, Number(requestTimeout));
       setHttpResults(res || []);
     } catch (error) {
       setHttpError(errorMessage(error, 'Unable to analyze the URLs. Check the inputs and try again.'));
@@ -183,7 +253,7 @@ export default function App() {
     setIsReconBusy(true);
     setReconError('');
     try {
-      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency), Number(fuzzDelayMs)));
+      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency), Number(fuzzDelayMs), Number(fuzzRps), Number(fuzzJitterMs), requestUserAgent, Number(requestTimeout)));
     } catch (error) {
       setReconError(errorMessage(error, 'Unable to run path checks. Try again.'));
     } finally {
@@ -468,13 +538,14 @@ ${rows || '<p>No results.</p>'}
             Web Audit
           </button>
           {([
-            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'],
+            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'],
           ] as const).map(([tab, label]) => (
-            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab); if (tab === 'history') void refreshHistory(); }}
+            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab as ActiveTab); if (tab === 'history') void refreshHistory(); }}
               className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
               {label}
             </button>
           ))}
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} title="Command palette (Ctrl/Cmd+K)" className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-300 hover:bg-slate-800 sm:px-3">⌘K</button>
         </nav>
       </header>
       <main className="mx-auto w-full max-w-screen-2xl">
@@ -544,7 +615,7 @@ ${rows || '<p>No results.</p>'}
                     <p className="text-xs text-slate-400">Summary from locally stored history and current in-app results. Run a scan or refresh history to populate.</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold disabled:bg-slate-700">{isHistoryBusy ? 'Loading…' : 'Refresh'}</button>
+                    <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold disabled:bg-slate-700">{isHistoryBusy ? 'Loadingâ€¦' : 'Refresh'}</button>
                     <button onClick={exportHistoryJSON} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
                     <button onClick={exportHistoryPDF} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History PDF</button>
                     <button onClick={() => setActiveTab('history')} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open History</button>
@@ -831,31 +902,29 @@ ${rows || '<p>No results.</p>'}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <label className="text-xs text-slate-400">Authorized HTTP/HTTPS URLs (one per line, max 100)</label>
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>Concurrency</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={httpThreads}
-                    onChange={(e) => setHttpThreads(Number(e.target.value))}
-                    disabled={isAnalyzing}
-                    className="w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>Delay (ms)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={5000}
-                    step={50}
-                    value={httpDelayMs}
-                    onChange={(e) => setHttpDelayMs(Number(e.target.value))}
-                    disabled={isAnalyzing}
-                    className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
-                  />
-                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Concurrency</span><input type="number" min={1} max={20} value={httpThreads} onChange={(e)=>setHttpThreads(Number(e.target.value))} disabled={isAnalyzing} className="w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Delay (ms)</span><input type="number" min={0} max={5000} step={50} value={httpDelayMs} onChange={(e)=>setHttpDelayMs(Number(e.target.value))} disabled={isAnalyzing} className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>RPS</span><input type="number" min={0} max={50} value={httpRps} onChange={(e)=>setHttpRps(Number(e.target.value))} disabled={isAnalyzing} className="w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200" title="Requests per second cap (0 = unlimited)" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Jitter (ms)</span><input type="number" min={0} max={5000} step={50} value={httpJitterMs} onChange={(e)=>setHttpJitterMs(Number(e.target.value))} disabled={isAnalyzing} className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-xs text-slate-200" /></label>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs text-slate-400">User-Agent preset
+                <select value={requestUserAgent} onChange={(e)=>setRequestUserAgent(e.target.value)} disabled={isAnalyzing} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-200">
+                  <option value="">Default (Codexa Scanner)</option>
+                  <option value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36">Browser-like (Chrome)</option>
+                  <option value="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)">Crawler-like (Googlebot)</option>
+                  <option value="curl/8.7.1">CLI (curl)</option>
+                </select>
+              </label>
+              <label className="text-xs text-slate-400">Timeout preset
+                <select value={requestTimeout} onChange={(e)=>setRequestTimeout(Number(e.target.value))} disabled={isAnalyzing} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-200">
+                  <option value={5}>5s</option><option value={10}>10s (default)</option><option value={20}>20s</option><option value={30}>30s</option>
+                </select>
+              </label>
+              <div className="flex items-end gap-2 sm:col-span-2">
+                <button type="button" onClick={togglePause} className={`min-h-10 rounded-lg border px-3 py-2 text-xs font-semibold ${isPaused ? 'border-amber-700 bg-amber-950/40 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>{isPaused ? 'Resume scans' : 'Pause scans'}</button>
+                <span className="text-[11px] text-slate-500">Applies to Web Audit &amp; Path Fuzzer.</span>
               </div>
             </div>
 
@@ -981,7 +1050,7 @@ ${rows || '<p>No results.</p>'}
                             <div key={`${hop.from}-${hop.to}-${hopIndex}`} className="rounded border border-slate-800 px-2 py-2 text-[11px]">
                               <div className="text-amber-300">HTTP {hop.statusCode || 'redirect'}</div>
                               <div className="break-all text-slate-400">{hop.from}</div>
-                              <div className="text-slate-600">↓</div>
+                              <div className="text-slate-600">â†“</div>
                               <div className="break-all text-slate-200">{hop.to}</div>
                             </div>
                           ))}
@@ -1002,7 +1071,7 @@ ${rows || '<p>No results.</p>'}
                         <div>{res.tls.verificationSummary || (res.tls.verified ? 'Verified by system trust store' : 'Not verified by system trust store')}</div>
                         <div>Leaf: {res.tls.subject || 'unknown'} · Issuer: {res.tls.issuer || 'unknown'}</div>
                         <div>Valid: {res.tls.notBefore ? new Date(res.tls.notBefore).toLocaleDateString() : 'n/a'} – {new Date(res.tls.expiresAt).toLocaleDateString()} ({res.tls.daysRemaining} days remaining) · SANs: {res.tls.sanCount ?? 0}</div>
-                        {res.tls.chainSubjects?.length ? <div className="text-emerald-300/90">Presented chain: {res.tls.chainSubjects.join(' → ')}</div> : null}
+                        {res.tls.chainSubjects?.length ? <div className="text-emerald-300/90">Presented chain: {res.tls.chainSubjects.join(' â†’ ')}</div> : null}
                       </div>
                     )}
 
@@ -1021,8 +1090,11 @@ ${rows || '<p>No results.</p>'}
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Passive findings ({res.findings.length})</div>
                         {res.findings.map((finding) => (
                           <div key={finding.id} className={`rounded-lg border p-3 ${getSeverityColor(finding.severity)}`}>
-                            <div className="flex items-center gap-2 text-xs font-bold uppercase">
-                              <span>{finding.severity}</span><span>{finding.title}</span>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-xs font-bold uppercase">
+                                <span>{finding.severity}</span><span>{finding.title}</span>
+                              </div>
+                              <button type="button" onClick={() => openFindingGuide(finding.id, res)} className="rounded border border-slate-600 bg-slate-900/60 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-slate-800">Why &amp; how to fix</button>
                             </div>
                             <p className="mt-1 text-xs text-slate-300">{finding.description}</p>
                             {finding.evidence && <p className="mt-1 break-all text-[11px] text-slate-400">Evidence: {finding.evidence}</p>}
@@ -1140,7 +1212,7 @@ ${rows || '<p>No results.</p>'}
               Also perform bounded DNS wordlist lookups (up to 500 labels)
             </label>
             {useDNSBrute && <textarea rows={4} value={subdomainWordlist} onChange={(e) => setSubdomainWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />}
-            <button onClick={runSubdomainDiscovery} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Enumerating…' : 'Query Certificate Transparency'}</button>
+            <button onClick={runSubdomainDiscovery} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Enumeratingâ€¦' : 'Query Certificate Transparency'}</button>
             <p className="text-[11px] text-slate-500">Passive results come from crt.sh. DNS wordlist checks are optional active queries; use only within authorized scope.</p>
           </div>
           {subdomainResult && <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
@@ -1158,8 +1230,11 @@ ${rows || '<p>No results.</p>'}
             <div className="flex flex-wrap items-center gap-3 justify-between">
               <label className="text-xs text-slate-400">Path wordlist (max 500)</label>
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Concurrency</span><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
-                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Delay (ms)</span><input type="number" min={0} max={5000} step={50} value={fuzzDelayMs} onChange={(e) => setFuzzDelayMs(Number(e.target.value))} className="w-24 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Concurrency</span><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e)=>setFuzzConcurrency(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Delay (ms)</span><input type="number" min={0} max={5000} step={50} value={fuzzDelayMs} onChange={(e)=>setFuzzDelayMs(Number(e.target.value))} className="w-24 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>RPS</span><input type="number" min={0} max={50} value={fuzzRps} onChange={(e)=>setFuzzRps(Number(e.target.value))} className="w-16 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <label className="flex items-center gap-2 text-xs text-slate-400"><span>Jitter</span><input type="number" min={0} max={5000} step={50} value={fuzzJitterMs} onChange={(e)=>setFuzzJitterMs(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></label>
+                <button type="button" onClick={togglePause} className={`min-h-10 rounded-lg border px-3 py-2 text-xs font-semibold ${isPaused ? 'border-amber-700 bg-amber-950/40 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>{isPaused ? 'Resume' : 'Pause'}</button>
               </div>
             </div>
             <div className="space-y-1">
@@ -1179,7 +1254,7 @@ ${rows || '<p>No results.</p>'}
               </div>
             </div>
             <textarea rows={7} value={fuzzWordlist} onChange={(e) => setFuzzWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />
-            <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking paths…' : 'Run HEAD-only Path Checks'}</button>
+            <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking pathsâ€¦' : 'Run HEAD-only Path Checks'}</button>
             <p className="text-[11px] text-slate-500">Sends bounded HEAD requests only, follows no redirects, and never reads or displays response bodies. A randomized missing-path check filters likely catch-all responses.</p>
           </div>
           {fuzzResult && <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
@@ -1194,8 +1269,8 @@ ${rows || '<p>No results.</p>'}
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <label className="block text-xs text-slate-400">Authorized hostname or host:port</label>
             <input value={tlsTarget} onChange={(e) => setTlsTarget(e.target.value)} placeholder="example.com:443" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
-            <button onClick={runTLSInspector} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting TLS…' : 'Inspect Certificate & Protocols'}</button>
-            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. “Not supported” requires an explicit TLS protocol_version alert; connection, handshake, and local-policy errors are “Inconclusive.” Certificate details are independently checked against the system trust store.</p>
+            <button onClick={runTLSInspector} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting TLSâ€¦' : 'Inspect Certificate & Protocols'}</button>
+            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. “Not supportedâ€ requires an explicit TLS protocol_version alert; connection, handshake, and local-policy errors are “Inconclusive.â€ Certificate details are independently checked against the system trust store.</p>
           </div>
           {tlsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <h2 className="break-all text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
@@ -1231,7 +1306,7 @@ ${rows || '<p>No results.</p>'}
             <label className="block text-xs text-slate-400">Authorized domain</label>
             <input value={dnsDomain} onChange={(e) => setDnsDomain(e.target.value)} placeholder="example.com" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
             <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={includeRDAP} onChange={(e) => setIncludeRDAP(e.target.checked)} />Include RDAP network/country registration lookups (external request)</label>
-            <button onClick={runDNSIntelligence} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Resolving records…' : 'Inspect DNS Records'}</button>
+            <button onClick={runDNSIntelligence} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Resolving recordsâ€¦' : 'Inspect DNS Records'}</button>
           </div>
           {dnsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <h2 className="text-sm font-bold">DNS intelligence · {dnsResult.domain}</h2>
@@ -1247,7 +1322,7 @@ ${rows || '<p>No results.</p>'}
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <label className="block text-xs text-slate-400">Authorized IPv4 or IPv6 address</label>
             <input value={ipTarget} onChange={(e) => setIpTarget(e.target.value)} placeholder="8.8.8.8 or 2001:4860:4860::8888" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
-            <button onClick={runIPInformation} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting IP…' : 'Inspect IP Information'}</button>
+            <button onClick={runIPInformation} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting IPâ€¦' : 'Inspect IP Information'}</button>
             <p className="text-[11px] leading-relaxed text-slate-500">The module shows local address classification, PTR results, and public-IP RDAP registration metadata. It does not provide geolocation or infer an ASN/provider beyond the labeled RDAP response.</p>
           </div>
           {ipResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
@@ -1265,7 +1340,7 @@ ${rows || '<p>No results.</p>'}
             <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries). Targets/results are saved with bounded redaction (credentials, sensitive URL query/fragments, and sensitive keys); review before sharing.</p>
             {historyError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{historyError}</p>}
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search target…" className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+              <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search targetâ€¦" className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
               <select value={historyTypeFilter} onChange={(e) => setHistoryTypeFilter(e.target.value as typeof historyTypeFilter)} className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
                 <option value="all">All types</option>
                 <option value="port">port</option>
@@ -1278,7 +1353,7 @@ ${rows || '<p>No results.</p>'}
               </select>
               <input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="Target for port diff" className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold transition hover:bg-emerald-500 disabled:bg-slate-700">{isHistoryBusy ? 'Loading…' : 'Refresh / Search'}</button>
+                <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold transition hover:bg-emerald-500 disabled:bg-slate-700">{isHistoryBusy ? 'Loadingâ€¦' : 'Refresh / Search'}</button>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1289,7 +1364,7 @@ ${rows || '<p>No results.</p>'}
             </div>
           </div>
           {portDiff && portDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div> : null}
-          {webAuditDiff && webAuditDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2"><h2 className="text-sm font-bold">Web Audit diff · {webAuditDiff.target}</h2><p className="text-xs text-slate-400">Latest: {webAuditDiff.latestAt ? new Date(webAuditDiff.latestAt).toLocaleString() : '—'} · Previous: {webAuditDiff.previousAt ? new Date(webAuditDiff.previousAt).toLocaleString() : '—'}</p>{webAuditDiff.note && <p className="text-xs text-slate-500">{webAuditDiff.note}</p>}{webAuditDiff.urlDiffs?.map((d) => (<div key={d.url} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs space-y-1"><div className="font-semibold text-slate-200 break-all">{d.url}</div><div className="flex flex-wrap gap-2">{d.gradeChanged ? <span className="rounded bg-amber-950 border border-amber-800 px-2 py-0.5 text-amber-300">Grade {d.previousGrade || '—'} → {d.latestGrade || '—'}</span> : <span className="text-slate-500">Grade unchanged ({d.latestGrade || '—'})</span>}<span className="rounded bg-slate-800 px-2 py-0.5">Risk {d.previousRiskScore} → {d.latestRiskScore} ({d.riskScoreDelta >= 0 ? '+' : ''}{d.riskScoreDelta})</span>{d.statusChanged && <span className="rounded bg-slate-800 px-2 py-0.5">Status {d.previousStatus} → {d.latestStatus}</span>}{d.certDaysDelta != null && <span className="rounded bg-slate-800 px-2 py-0.5">Cert days {d.previousCertDays ?? 'n/a'} → {d.latestCertDays ?? 'n/a'} ({d.certDaysDelta >= 0 ? '+' : ''}{d.certDaysDelta})</span>}</div><div className="flex flex-wrap gap-2">{d.newMissingHeaders?.map((h) => <span key={`nm-${h}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New missing: {h}</span>)}{d.resolvedMissingHeaders?.map((h) => <span key={`rm-${h}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved missing: {h}</span>)}{d.newFindingIds?.map((id) => <span key={`nf-${id}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New finding: {id}</span>)}{d.resolvedFindingIds?.map((id) => <span key={`rf-${id}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved finding: {id}</span>)}</div>{!d.gradeChanged && d.riskScoreDelta === 0 && !d.statusChanged && d.certDaysDelta == null && !(d.newMissingHeaders?.length) && !(d.resolvedMissingHeaders?.length) && !(d.newFindingIds?.length) && !(d.resolvedFindingIds?.length) && <span className="text-slate-500">No compared changes detected.</span>}</div>))}</div> : null}
+          {webAuditDiff && webAuditDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2"><h2 className="text-sm font-bold">Web Audit diff · {webAuditDiff.target}</h2><p className="text-xs text-slate-400">Latest: {webAuditDiff.latestAt ? new Date(webAuditDiff.latestAt).toLocaleString() : '—'} · Previous: {webAuditDiff.previousAt ? new Date(webAuditDiff.previousAt).toLocaleString() : '—'}</p>{webAuditDiff.note && <p className="text-xs text-slate-500">{webAuditDiff.note}</p>}{webAuditDiff.urlDiffs?.map((d) => (<div key={d.url} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs space-y-1"><div className="font-semibold text-slate-200 break-all">{d.url}</div><div className="flex flex-wrap gap-2">{d.gradeChanged ? <span className="rounded bg-amber-950 border border-amber-800 px-2 py-0.5 text-amber-300">Grade {d.previousGrade || '—'} â†’ {d.latestGrade || '—'}</span> : <span className="text-slate-500">Grade unchanged ({d.latestGrade || '—'})</span>}<span className="rounded bg-slate-800 px-2 py-0.5">Risk {d.previousRiskScore} â†’ {d.latestRiskScore} ({d.riskScoreDelta >= 0 ? '+' : ''}{d.riskScoreDelta})</span>{d.statusChanged && <span className="rounded bg-slate-800 px-2 py-0.5">Status {d.previousStatus} â†’ {d.latestStatus}</span>}{d.certDaysDelta != null && <span className="rounded bg-slate-800 px-2 py-0.5">Cert days {d.previousCertDays ?? 'n/a'} â†’ {d.latestCertDays ?? 'n/a'} ({d.certDaysDelta >= 0 ? '+' : ''}{d.certDaysDelta})</span>}</div><div className="flex flex-wrap gap-2">{d.newMissingHeaders?.map((h) => <span key={`nm-${h}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New missing: {h}</span>)}{d.resolvedMissingHeaders?.map((h) => <span key={`rm-${h}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved missing: {h}</span>)}{d.newFindingIds?.map((id) => <span key={`nf-${id}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New finding: {id}</span>)}{d.resolvedFindingIds?.map((id) => <span key={`rf-${id}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved finding: {id}</span>)}</div>{!d.gradeChanged && d.riskScoreDelta === 0 && !d.statusChanged && d.certDaysDelta == null && !(d.newMissingHeaders?.length) && !(d.resolvedMissingHeaders?.length) && !(d.newFindingIds?.length) && !(d.resolvedFindingIds?.length) && <span className="text-slate-500">No compared changes detected.</span>}</div>))}</div> : null}
           <div className="space-y-2">
             {!isHistoryBusy && historyEntries.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-6 text-center text-xs text-slate-400">No history records match the current search/filter. Run scans or clear filters to see stored results.</div>
@@ -1309,6 +1384,97 @@ ${rows || '<p>No results.</p>'}
           </div>
         </div>
       )}
+      {activeTab === 'playbook' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-bold">Security Playbook (Bilingual Remediation Guide)</h2>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Language:</span>
+                <button type="button" onClick={()=>setPlaybookLang('en')} className={`rounded px-2 py-1 ${playbookLang==='en'?'bg-emerald-600 text-white':'bg-slate-800 text-slate-300'}`}>EN</button>
+                <button type="button" onClick={()=>setPlaybookLang('my')} className={`rounded px-2 py-1 ${playbookLang==='my'?'bg-emerald-600 text-white':'bg-slate-800 text-slate-300'}`}>မြန်မာ</button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">Embedded remediation knowledge (EN/မြန်မာ) mapped to finding IDs with mechanism, common mistakes, attack scenario, where to fix, and stack-specific before/after/deploy/verify guidance. For authorized remediation only.</p>
+            <input value={playbookQuery} onChange={(e)=>setPlaybookQuery(e.target.value)} placeholder="Search finding id or title..." className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {((remediationKB?.entries || []) as any[]).filter((e:any)=>{
+              const q=playbookQuery.toLowerCase().trim(); if(!q) return true;
+              return (e.id||'').toLowerCase().includes(q) || (e.title?.en||'').toLowerCase().includes(q) || (e.title?.my||'').includes(playbookQuery);
+            }).map((e:any)=>(
+              <button key={e.id} type="button" onClick={()=>{ setFindingDrawerId(e.id); setPlaybookStack(detectedTechStack); }} className="text-left rounded-xl border border-slate-800 bg-slate-900 p-4 hover:border-emerald-700">
+                <div className="font-mono text-[11px] text-emerald-400">{e.id}</div>
+                <div className="mt-1 text-sm font-semibold">{playbookLang==='my' ? (e.title?.my || e.title?.en) : (e.title?.en || e.title?.my)}</div>
+                <div className="mt-2 line-clamp-3 text-xs text-slate-400">{guideText(e,'mechanism')}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {commandPaletteOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[10vh]" onClick={()=>setCommandPaletteOpen(false)}>
+          <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl" onClick={(e)=>e.stopPropagation()}>
+            <input autoFocus value={paletteQuery} onChange={(e)=>setPaletteQuery(e.target.value)} placeholder="Go to module or action... (Ctrl/Cmd+K)" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+            <div className="mt-2 max-h-72 space-y-1 overflow-auto">
+              {(([
+                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],
+              ] as [string,ActiveTab][]).filter(([l])=>l.toLowerCase().includes(paletteQuery.toLowerCase()))).map(([label,tab])=>(
+                <button key={tab} type="button" onClick={()=>{ setActiveTab(tab); if(tab==='history') void refreshHistory(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{label} <span className="text-xs text-slate-500">module</span></button>
+              ))}
+              <button type="button" onClick={()=>{ void refreshHistory(); setActiveTab('history'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Refresh History <span className="text-xs text-slate-500">action</span></button>
+              <button type="button" onClick={()=>{ void togglePause(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{isPaused?'Resume scans':'Pause scans'} <span className="text-xs text-slate-500">action</span></button>
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">Esc to close</div>
+          </div>
+        </div>
+      )}
+
+      {findingDrawerId && (() => {
+        const g = lookupGuide(findingDrawerId);
+        const stacks: string[] = (remediationKB?.stacks && remediationKB.stacks.length) ? remediationKB.stacks : ['Next.js','Laravel','Express','Nginx','Apache','Supabase'];
+        const stackFix = g?.stacks?.[playbookStack] || g?.stacks?.[detectedTechStack] || null;
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={()=>setFindingDrawerId(null)}>
+            <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-slate-700 bg-slate-900 p-4 sm:p-5" onClick={(e)=>e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-mono text-[11px] text-emerald-400">{findingDrawerId}</div>
+                  <h3 className="text-lg font-bold">{g ? (playbookLang==='my' ? (g.title?.my || g.title?.en) : (g.title?.en || g.title?.my)) : 'Remediation guide'}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={()=>setPlaybookLang('en')} className={`rounded px-2 py-1 text-xs ${playbookLang==='en'?'bg-emerald-600':'bg-slate-800'}`}>EN</button>
+                  <button type="button" onClick={()=>setPlaybookLang('my')} className={`rounded px-2 py-1 text-xs ${playbookLang==='my'?'bg-emerald-600':'bg-slate-800'}`}>မြန်မာ</button>
+                  <button type="button" onClick={()=>setFindingDrawerId(null)} className="rounded border border-slate-700 px-2 py-1 text-xs">Close</button>
+                </div>
+              </div>
+              {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
+                <div className="mt-4 space-y-4 text-sm">
+                  <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
+                  <section><h4 className="font-semibold text-emerald-300">Common developer mistakes</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{guideList(g,'commonMistakes').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>
+                  <section><h4 className="font-semibold text-emerald-300">Attack scenario</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'attackScenario')}</p></section>
+                  <section><h4 className="font-semibold text-emerald-300">Where to fix</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'whereToFix')}</p></section>
+                  <section>
+                    <div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold text-emerald-300">Stack-specific fix</h4><span className="text-[11px] text-slate-500">Detected: {detectedTechStack}</span></div>
+                    <div className="mt-2 flex flex-wrap gap-1">{stacks.map(s=> <button key={s} type="button" onClick={()=>setPlaybookStack(s)} className={`rounded border px-2 py-1 text-xs ${playbookStack===s?'border-emerald-600 bg-emerald-950/40 text-emerald-300':'border-slate-700 text-slate-300'}`}>{s}</button>)}</div>
+                    {stackFix ? (
+                      <div className="mt-3 space-y-2">
+                        <div className="text-xs text-slate-400">Target file/location: <span className="font-mono text-slate-200">{stackFix.file}</span></div>
+                        <div><div className="text-xs font-semibold text-rose-300">Before</div><pre className="mt-1 whitespace-pre-wrap break-all rounded border border-slate-800 bg-slate-950 p-2 text-[11px] text-slate-200">{stackFix.before}</pre></div>
+                        <div><div className="text-xs font-semibold text-emerald-300">After</div><pre className="mt-1 whitespace-pre-wrap break-all rounded border border-slate-800 bg-slate-950 p-2 text-[11px] text-slate-200">{stackFix.after}</pre></div>
+                        <div><div className="text-xs font-semibold text-sky-300">Deploy / apply</div><p className="mt-1 whitespace-pre-wrap text-xs text-slate-300">{stackFix.deploy}</p></div>
+                        <div><div className="text-xs font-semibold text-sky-300">Verify</div><p className="mt-1 whitespace-pre-wrap text-xs text-slate-300">{stackFix.verify}</p></div>
+                      </div>
+                    ) : <p className="mt-2 text-xs text-slate-400">No stack-specific snippet available for this stack.</p>}
+                  </section>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       </main>
       <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">
         Developed by{' '}

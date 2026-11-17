@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/netip"
@@ -40,6 +41,38 @@ type App struct {
 	activeScan *portScan
 	nextScanID uint64
 	historyDB  *sql.DB
+
+	rateMu      sync.Mutex
+	scanPaused  bool
+	pauseCond   *sync.Cond
+	activeBulk  bool
+}
+
+type ScanRateControl struct {
+	RPS      int `json:"rps"`      // 0 = unlimited
+	JitterMs int `json:"jitterMs"` // 0..N random extra delay
+}
+
+func (c ScanRateControl) normalized() ScanRateControl {
+	if c.RPS < 0 {
+		c.RPS = 0
+	}
+	if c.RPS > 50 {
+		c.RPS = 50
+	}
+	if c.JitterMs < 0 {
+		c.JitterMs = 0
+	}
+	if c.JitterMs > 5000 {
+		c.JitterMs = 5000
+	}
+	return c
+}
+
+func NewApp() *App {
+	a := &App{}
+	a.pauseCond = sync.NewCond(&a.rateMu)
+	return a
 }
 
 type portScan struct {
@@ -64,11 +97,6 @@ const (
 	maxScanTimeout     = 30_000
 	scanResolveTimeout = 5 * time.Second
 )
-
-func NewApp() *App {
-	return &App{}
-}
-
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	configDir, err := os.UserConfigDir()
@@ -525,7 +553,75 @@ const (
 	reflectedProbeMarker          = "codexa_probe_123"
 )
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int) []BulkHeaderResult {
+
+
+func (a *App) PauseScans() {
+	if a == nil { return }
+	a.rateMu.Lock()
+	a.scanPaused = true
+	a.rateMu.Unlock()
+	runtime.EventsEmit(a.ctx, "scan:control", "paused")
+}
+
+func (a *App) ResumeScans() {
+	if a == nil { return }
+	a.rateMu.Lock()
+	a.scanPaused = false
+	if a.pauseCond != nil { a.pauseCond.Broadcast() }
+	a.rateMu.Unlock()
+	runtime.EventsEmit(a.ctx, "scan:control", "running")
+}
+
+func (a *App) IsScansPaused() bool {
+	if a == nil { return false }
+	a.rateMu.Lock()
+	defer a.rateMu.Unlock()
+	return a.scanPaused
+}
+
+func (a *App) waitIfPaused(ctx context.Context) bool {
+	if a == nil { return true }
+	for {
+		a.rateMu.Lock()
+		paused := a.scanPaused
+		a.rateMu.Unlock()
+		if !paused { return true }
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func (a *App) waitForRateSlot(ctx context.Context, last time.Time, rc ScanRateControl) (time.Time, bool) {
+	rc = rc.normalized()
+	if !a.waitIfPaused(ctx) { return last, false }
+	delay := time.Duration(0)
+	if rc.RPS > 0 {
+		interval := time.Second / time.Duration(rc.RPS)
+		if !last.IsZero() {
+			next := last.Add(interval)
+			if now := time.Now(); next.After(now) { delay = next.Sub(now) }
+		}
+	}
+	if rc.JitterMs > 0 {
+		delay += time.Duration(rand.Intn(rc.JitterMs+1)) * time.Millisecond
+	}
+	if delay > 0 {
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return last, false
+		case <-t.C:
+		}
+	}
+	if !a.waitIfPaused(ctx) { return time.Now(), false }
+	return time.Now(), true
+}
+
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int) []BulkHeaderResult {
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -548,12 +644,10 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	if concurrency > 20 {
 		concurrency = 20
 	}
-	if requestDelayMs < 0 {
-		requestDelayMs = 0
-	}
-	if requestDelayMs > 5000 {
-		requestDelayMs = 5000
-	}
+	if requestDelayMs < 0 { requestDelayMs = 0 }
+	if requestDelayMs > 5000 { requestDelayMs = 5000 }
+	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
+	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds})
 
 	secHeaders := []string{
 		"Strict-Transport-Security",
@@ -567,23 +661,44 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	results := make([]BulkHeaderResult, len(urls))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
+	ctx := a.ctx
+	if ctx == nil { ctx = context.Background() }
+	var gateMu sync.Mutex
+	var last time.Time
+	nextSlot := func() bool {
+		gateMu.Lock(); defer gateMu.Unlock()
+		t, ok := a.waitForRateSlot(ctx, last, rate)
+		last = t
+		return ok
+	}
 
 	for idx, rawURL := range urls {
+		if ctx.Err() != nil { break }
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int, target string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if requestDelayMs > 0 {
-				time.Sleep(time.Duration(requestDelayMs) * time.Millisecond)
+			defer wg.Done(); defer func() { <-sem }()
+			if !nextSlot() {
+				inputURL := analysisURLForDisplay(target)
+				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: "Scan paused/stopped before request"}
+				return
 			}
-			client, err := newScopedHTTPClient(target, allowPrivateTargets, net.DefaultResolver)
+			if requestDelayMs > 0 {
+				select {
+				case <-ctx.Done():
+					inputURL := analysisURLForDisplay(target)
+					results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: "Scan stopped"}
+					return
+				case <-time.After(time.Duration(requestDelayMs) * time.Millisecond):
+				}
+			}
+			client, err := newScopedHTTPClientWithProfile(target, allowPrivateTargets, net.DefaultResolver, profile)
 			if err != nil {
 				inputURL := analysisURLForDisplay(target)
 				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
 				return
 			}
-			results[i] = analyzeURL(target, client, secHeaders)
+			results[i] = analyzeURL(target, client, secHeaders, profile)
 			client.CloseIdleConnections()
 		}(idx, rawURL)
 	}
@@ -607,7 +722,7 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	return results
 }
 
-func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHeaderResult {
+func analyzeURL(target string, client *http.Client, secHeaders []string, profile HTTPRequestProfile) BulkHeaderResult {
 	inputURL, parsed, _, err := parseHTTPAnalysisURL(target)
 	if err != nil {
 		return BulkHeaderResult{URL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
@@ -619,7 +734,8 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 		result.Assessment = webAuditAssessmentLabel
 		return result
 	}
-	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	ua := profile.resolvedUserAgent()
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Origin", "https://probe.codexa.invalid")
 	resp, err := client.Do(req)
 	result.Redirects = snapshotRedirectHops(client)
@@ -641,8 +757,8 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 		inspectBase.RawPath = ""
 		inspectBase.RawQuery = ""
 		inspectBase.Fragment = ""
-		result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "")
-		result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.")
+		result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "", ua)
+		result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.", ua)
 		result.RiskScore, result.Grade = gradeFindings(result.Findings)
 		return result
 	}
@@ -705,10 +821,10 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	inspectBase.RawPath = ""
 	inspectBase.RawQuery = ""
 	inspectBase.Fragment = ""
-	result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "")
-	result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.")
+	result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "", ua)
+	result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.", ua)
 
-	clientSide, csFindings := auditClientSideExposure(client, resp.Request.URL, bodyBytes, result.Findings)
+	clientSide, csFindings := auditClientSideExposure(client, resp.Request.URL, bodyBytes, result.Findings, ua)
 	if clientSide != nil {
 		result.ClientSideAudit = clientSide
 	}
@@ -720,14 +836,14 @@ func analyzeURL(target string, client *http.Client, secHeaders []string) BulkHea
 	return result
 }
 
-func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte, existing []SecurityFinding) (*ClientSideAudit, []SecurityFinding) {
+func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte, existing []SecurityFinding, ua string) (*ClientSideAudit, []SecurityFinding) {
 	if client == nil || pageURL == nil || len(body) == 0 {
 		return nil, nil
 	}
 	audit := &ClientSideAudit{}
 	findings := make([]SecurityFinding, 0, 8)
 
-	if probe := probeReflectedParameter(client, pageURL, existing); probe != nil {
+	if probe := probeReflectedParameter(client, pageURL, existing, ua); probe != nil {
 		audit.ReflectedParamProbe = probe
 		if probe.Kind == "reflected" {
 			findings = append(findings, SecurityFinding{
@@ -752,7 +868,7 @@ func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte,
 	seenMaps := map[string]bool{}
 
 	for _, scriptURL := range scriptURLs {
-		content, ok := fetchBoundedTextResource(client, scriptURL, maxClientScriptBytes)
+		content, ok := fetchBoundedTextResource(client, scriptURL, maxClientScriptBytes, ua)
 		if !ok {
 			audit.Notes = append(audit.Notes, "Could not fetch bounded script: "+truncateForPDF(scriptURL, 120))
 			continue
@@ -776,7 +892,7 @@ func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte,
 			})
 		}
 
-		if mapClue := detectSourceMap(client, pageURL, scriptURL, content); mapClue != nil {
+		if mapClue := detectSourceMap(client, pageURL, scriptURL, content, ua); mapClue != nil {
 			mkey := mapClue.ScriptURL + "|" + mapClue.Value
 			if !seenMaps[mkey] {
 				seenMaps[mkey] = true
@@ -841,7 +957,7 @@ func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte,
 	return audit, findings
 }
 
-func probeReflectedParameter(client *http.Client, pageURL *url.URL, existing []SecurityFinding) *ClientSideClue {
+func probeReflectedParameter(client *http.Client, pageURL *url.URL, existing []SecurityFinding, ua string) *ClientSideClue {
 	if pageURL == nil || pageURL.RawQuery == "" {
 		return nil
 	}
@@ -857,7 +973,7 @@ func probeReflectedParameter(client *http.Client, pageURL *url.URL, existing []S
 	if err != nil {
 		return &ClientSideClue{Kind: "skipped", Note: "Could not build reflected-parameter probe request"}
 	}
-	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
 		return &ClientSideClue{Kind: "skipped", Note: "Reflected-parameter probe request failed"}
@@ -926,12 +1042,12 @@ func extractFirstPartyScriptURLs(pageURL *url.URL, body []byte, limit int) []str
 	return out
 }
 
-func fetchBoundedTextResource(client *http.Client, target string, maxBytes int64) (string, bool) {
+func fetchBoundedTextResource(client *http.Client, target string, maxBytes int64, ua string) (string, bool) {
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return "", false
 	}
-	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", false
@@ -982,7 +1098,7 @@ func scanScriptSecrets(scriptURL, content string) []ClientSideClue {
 	return clues
 }
 
-func detectSourceMap(client *http.Client, pageURL *url.URL, scriptURL, content string) *ClientSideClue {
+func detectSourceMap(client *http.Client, pageURL *url.URL, scriptURL, content string, ua string) *ClientSideClue {
 	m := sourceMapRegex.FindStringSubmatch(content)
 	if len(m) < 2 {
 		return nil
@@ -1007,18 +1123,18 @@ func detectSourceMap(client *http.Client, pageURL *url.URL, scriptURL, content s
 		return &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: truncateForPDF(raw, 120), Note: "Source map reference could not be resolved"}
 	}
 	clue := &ClientSideClue{Kind: "source-map", ScriptURL: scriptURL, Value: abs.String(), Note: "Bounded same-origin HEAD check performed"}
-	reachable, status := headReachable(client, abs.String())
+	reachable, status := headReachable(client, abs.String(), ua)
 	clue.Reachable = &reachable
 	clue.StatusCode = status
 	return clue
 }
 
-func headReachable(client *http.Client, target string) (bool, int) {
+func headReachable(client *http.Client, target string, ua string) (bool, int) {
 	req, err := http.NewRequest(http.MethodHead, target, nil)
 	if err != nil {
 		return false, 0
 	}
-	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, 0
@@ -1126,7 +1242,7 @@ func sanitizeIDFragment(s string) string {
 	return out
 }
 
-func inspectWebResource(client *http.Client, base *url.URL, path string, maxBytes int64, note string) *WebResourceInspector {
+func inspectWebResource(client *http.Client, base *url.URL, path string, maxBytes int64, note string, ua string) *WebResourceInspector {
 	target := joinFuzzURL(base, path)
 	inspector := &WebResourceInspector{URL: target, Note: note}
 	fetchClient := client
@@ -1148,7 +1264,7 @@ func inspectWebResource(client *http.Client, base *url.URL, path string, maxByte
 		inspector.Error = "Invalid inspector URL."
 		return inspector
 	}
-	req.Header.Set("User-Agent", "Codexa-Scanner/1.1 (passive authorized security assessment)")
+	req.Header.Set("User-Agent", ua)
 	resp, err := fetchClient.Do(req)
 	if err != nil {
 		inspector.Error = httpAnalysisErrorMessage(err)

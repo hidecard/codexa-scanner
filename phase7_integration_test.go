@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func TestIntegrationRedirectScopeBlocksCrossHostWithLocalFixture(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(start.URL, client, nil)
+	result := analyzeURL(start.URL, client, nil, HTTPRequestProfile{})
 	if result.Error == "" || !strings.Contains(strings.ToLower(result.Error), "redirect") {
 		t.Fatalf("expected redirect scope error, got %+v", result)
 	}

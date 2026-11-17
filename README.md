@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="github_readme_header.jpg" alt="Codexa Scanner" width="100%" />
 </p>
 
@@ -20,7 +20,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Hostnames resolve once per submitted URL; the complete DNS answer set is policy-checked and one deterministic address is pinned through the request/redirect chain. Literal IPs skip DNS. Ambient proxies are disabled so they cannot bypass address checks.
 - Private RFC1918, IPv6 ULA, and loopback targets require a default-off, one-shot opt-in for authorized lab use. Link-local, multicast, unspecified, and special-use/reserved addresses remain blocked.
 - Passive checks for HTTPS transport, verified TLS certificate expiry/trust/hostname errors, mixed-content references, common security headers, `Secure`/`HttpOnly`/`SameSite` cookie attributes, CORS/JWT posture and DB-error disclosure clues, and bounded client-side exposure indicators (redacted secret-pattern, reachable source map, endpoint/BaaS extraction, DOM sink, harmless reflected-parameter probe).
-- Actionable findings with severity, evidence, remediation guidance, a capped 0â€“100 heuristic risk score, and an A+â€“F grade.
+- Actionable findings with severity, evidence, remediation guidance, a capped 0–100 heuristic risk score, and an A+–F grade.
 - Bulk analysis of up to 100 URLs with bounded concurrency and redirect depth.
 - Subdomain discovery from Certificate Transparency data, with an optional, capped DNS wordlist lookup; discovered names can be sent to the HTTP analyzer.
 - A path discovery module that uses HEAD requests only, compares status/Content-Length to a randomized missing-path baseline, and never returns response bodies.

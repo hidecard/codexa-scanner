@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -206,7 +206,7 @@ func TestAnalyzeURLRejectsUntrustedTLSCertificate(t *testing.T) {
 	defer server.Close()
 
 	client := &http.Client{Timeout: time.Second}
-	result := analyzeURL(server.URL, client, nil)
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
 	if result.Error == "" {
 		t.Fatal("expected self-signed test certificate to fail normal TLS verification")
 	}
@@ -232,7 +232,7 @@ func TestAnalyzeURLReportsPlainHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := analyzeURL(server.URL, &http.Client{Timeout: time.Second}, nil)
+	result := analyzeURL(server.URL, &http.Client{Timeout: time.Second}, nil, HTTPRequestProfile{})
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}
@@ -404,7 +404,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0)
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
 		t.Fatalf("expected private target policy error, got %+v", results)
 	}
@@ -412,7 +412,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 		t.Fatalf("request reached private target without opt-in (%d requests)", got)
 	}
 
-	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0)
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10)
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
@@ -434,7 +434,7 @@ func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testi
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0)
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
 		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
 	}
@@ -474,7 +474,7 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 		t.Fatal("scoped transport must not use ambient proxies")
 	}
 
-	result := analyzeURL(serverURL.String(), client, nil)
+	result := analyzeURL(serverURL.String(), client, nil, HTTPRequestProfile{})
 	if result.Error != "" || result.StatusCode != http.StatusOK {
 		t.Fatalf("expected redirect to use pinned loopback address, got %+v", result)
 	}
@@ -505,7 +505,7 @@ func TestAnalyzeURLStopsAfterFiveRedirects(t *testing.T) {
 	}
 	defer client.CloseIdleConnections()
 
-	result := analyzeURL(server.URL+"/start", client, nil)
+	result := analyzeURL(server.URL+"/start", client, nil, HTTPRequestProfile{})
 	if !strings.Contains(result.Error, "after five hops") {
 		t.Fatalf("expected five-hop redirect limit error, got %+v", result)
 	}
@@ -828,7 +828,7 @@ func TestAnalyzeURLInspectsSecurityTxtAndRobotsTxt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(server.URL, client, nil)
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}
@@ -872,7 +872,7 @@ func TestAnalyzeURLReportsMissingSecurityTxtAndRobotsTxt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(server.URL, client, nil)
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}
