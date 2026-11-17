@@ -57,9 +57,16 @@ For development, run `wails dev` from the repository root after installing depen
 
 Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md). The complete documentation index is in [`docs/README.md`](docs/README.md).
 
-## CI artifacts
+## CI artifacts and releases (v1.0)
 
-GitHub Actions runs on pushes to `main`, version tags (`v*`), and pull requests. Linux CI builds a Debian package (`.deb`) and Windows CI builds the portable application executable (`.exe`). On a version tag, the workflow also attaches both artifacts to a GitHub Release. Download artifacts from the Actions run's **Artifacts** section or the GitHub Release.
+GitHub Actions (`.github/workflows/build.yml`) runs on pushes to `main`, pull requests, and version tags (`v*`).
+
+- **Permissions:** least-privilege by default (`contents: read`); only the tag-release job is granted `contents: write`.
+- **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.0.0_amd64.deb`.
+- **Windows (`windows-latest`):** builds portable `CodexaScanner.exe` and runs `go test ./...` and `go vet ./...` (`-race` is not supported on `windows/386` toolchains; Linux CI provides race coverage).
+- **Release (tag `v1.0.0` / `v*`):** attaches `.deb` and `.exe` artifacts to a GitHub Release with generated notes.
+
+Frontend dependencies are pinned to exact versions with a committed lockfile to reduce build drift. Download build artifacts from the Actions run or the GitHub Release assets. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
 
 ## Repository topics
 

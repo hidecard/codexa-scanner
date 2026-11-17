@@ -40,3 +40,7 @@ History is stored under the operating system user configuration directory in `Co
 ## Troubleshooting and limits
 
 If history is unavailable, scanning remains usable but the History/Dashboard views may be empty. If no records match, clear search/filter criteria. If no diff appears, save at least two completed comparable scans for the same normalized target. If an export fails, check destination permissions, available disk space, and that the path is writable, then retry with a smaller result set. Exported reports are observations and heuristics, not formal risk ratings or proof of exploitability. PDF detail is bounded (e.g. limited targets/findings per report) for readability; use JSON export for full redacted data.
+
+## Install, upgrade, and uninstall data behavior
+
+Local history is stored outside the application install directory in the OS user configuration directory (`CodexaScanner/history.sqlite`). Replacing/upgrading binaries should not remove this user-data path, but uninstall/remove behavior can differ by platform and packaging (for example, package remove vs purge, or deleting a portable executable). Verify history retention on clean systems for v1.0 `.deb` and `.exe` releases; see [Release & Installer Verification (v1.0)](release-verification.md).

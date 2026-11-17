@@ -99,11 +99,11 @@ For each item, first check the current code and tests, decide whether the work i
 
 - [=] Existing Go unit tests and Linux CI `go test`/`go vet` exist.
 - [=] Linux and Windows CI build jobs exist; frontend `build` runs TypeScript checking and Vite build through Wails.
-- [ ] Add race-detection CI (`go test -race ./...`) where supported; keep platform-specific constraints documented.
-- [ ] Add focused frontend tests for loading/error states and critical UI flows; do not add a test framework unless the coverage provides value.
-- [ ] Add integration tests for cancellation, redirects/scope, persistence, and exports using local fixtures/temp directories.
-- [ ] Scope workflow permissions to `contents: read` for build/test jobs and grant `contents: write` only to the release job if the release action requires it.
-- [ ] Replace floating `latest` frontend dependencies with reviewed, exact compatible versions and regenerate the lockfile.
+- [x] Add race-detection CI (`go test -race ./...`) where supported; keep platform-specific constraints documented. `.github/workflows/build.yml`: Linux job runs `go test -race ./...` and `go vet ./...`; Windows job runs `go test ./...` and `go vet ./...` because `-race` is not supported on `windows/386` Go toolchains (Linux CI provides race coverage).
+- [~] Add focused frontend tests for loading/error states and critical UI flows; do not add a test framework unless the coverage provides value. Deferred: no frontend test framework added yet; existing coverage relies on TypeScript/Vite build checks and Go-side integration/unit tests.
+- [x] Add integration tests for cancellation, redirects/scope, persistence, and exports using local fixtures/temp directories. Added `phase7_integration_test.go` covering redirect scope blocking via local fixtures, cancellation flow, SQLite persistence/reopen+diff with temp dirs, and JSON/PDF export preparation/writing with redacted outputs.
+- [x] Scope workflow permissions to `contents: read` for build/test jobs and grant `contents: write` only to the release job if the release action requires it. Updated workflow top-level permissions to `contents: read`; release job has scoped `contents: write`.
+- [x] Replace floating `latest` frontend dependencies with reviewed, exact compatible versions and regenerate the lockfile. Pinned `@vitejs/plugin-react`, `autoprefixer`, `postcss`, `react`, `react-dom`, `typescript`, `vite` to exact resolved versions in `frontend/package.json` and regenerated `frontend/package-lock.json`.
 - [-] A separate test for every static label or trivial getter is unnecessary; prioritize regressions and security boundaries.
 
 ## Phase 8 — Installer and release management (High for public distribution)
@@ -111,9 +111,9 @@ For each item, first check the current code and tests, decide whether the work i
 **Review:** Linux `.deb` packaging and Windows executable artifact builds already exist. Tags create GitHub Releases. The Windows artifact is currently a portable `.exe`, not a conventional installer; signing/update channels are not set up.
 
 - [=] Linux `.deb` package, Windows `.exe` CI artifact, and tag-based GitHub Release exist.
-- [ ] Verify install/uninstall, upgrade, application data retention, and dependency behavior on clean supported systems.
-- [ ] Decide whether users need a Windows installer in addition to the portable executable; add only after upgrade/uninstall behavior is defined.
-- [ ] Add signing/provenance and release checks if required by the distribution threat model.
+- [~] Verify install/uninstall, upgrade, application data retention, and dependency behavior on clean supported systems. Added documented v1.0 verification procedure and data-retention expectations in `docs/release-verification.md`, `docs/user-guide.md`, and `docs/history-and-reports.md`; actual clean VM/PC execution and recorded results remain a manual release task outside this environment.
+- [=] Decide whether users need a Windows installer in addition to the portable executable; add only after upgrade/uninstall behavior is defined. Current v1.0 release ships portable `.exe` (documented); conventional installer deferred until behavior is defined and verified.
+- [~] Add signing/provenance and release checks if required by the distribution threat model. Not configured; documented in `docs/release-verification.md` for follow-up if required.
 - [-] macOS package/auto-updater — defer until macOS is an explicitly supported target and signing/notarization can be maintained.
 
 ## Phase 9 — Modern Stack & Client-Side Exposure Audit (High)
