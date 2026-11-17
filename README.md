@@ -21,6 +21,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - A TLS inspector for certificate trust/self-signed state, expiry, subject alternative names, and negotiated cipher. TLS 1.0/1.1 probes report Supported after an exact-version handshake, Not supported only after an explicit `protocol_version` alert, and otherwise Inconclusive with the probe error.
 - Passive technology and edge-product clues based on observed response headers, cookie names, and a bounded HTML sample. Fingerprints are clues, not confirmation of a WAF or product.
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
+- Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
 - Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target.
 - Native save dialogs for JSON reports and port CSV exports.
 - Cross-platform desktop UI powered by Wails.
@@ -43,6 +44,10 @@ wails build -platform linux/amd64
 ```
 
 For development, run `wails dev` from the repository root after installing dependencies. Wails CLI installation instructions are available in the official Wails documentation.
+
+## Documentation
+
+Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md). The complete documentation index is in [`docs/README.md`](docs/README.md).
 
 ## CI artifacts
 

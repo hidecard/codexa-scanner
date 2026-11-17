@@ -8,6 +8,7 @@ import {
   EnumerateSubdomains,
   FuzzPaths,
   InspectTLS,
+  IPInformation,
   DNSIntelligence,
   GetScanHistory,
   DiffLatestPortScans,
@@ -16,7 +17,7 @@ import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'history'>('scanner');
+  const [activeTab, setActiveTab] = useState<'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history'>('scanner');
 
   // --- Port Scanner States ---
   const [target, setTarget] = useState('scanme.nmap.org');
@@ -30,6 +31,7 @@ export default function App() {
   const [findings, setFindings] = useState<main.PortFinding[]>([]);
   const [scanError, setScanError] = useState('');
   const [resolvedScanTarget, setResolvedScanTarget] = useState('');
+  const [httpError, setHttpError] = useState('');
 
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
@@ -52,10 +54,21 @@ export default function App() {
   const [dnsDomain, setDnsDomain] = useState('example.com');
   const [includeRDAP, setIncludeRDAP] = useState(false);
   const [dnsResult, setDnsResult] = useState<main.DNSIntelligenceResult | null>(null);
+  const [ipTarget, setIpTarget] = useState('8.8.8.8');
+  const [ipResult, setIpResult] = useState<main.IPInformationResult | null>(null);
   const [historyTarget, setHistoryTarget] = useState('scanme.nmap.org');
   const [historyEntries, setHistoryEntries] = useState<main.HistoryEntry[]>([]);
   const [portDiff, setPortDiff] = useState<main.PortScanDiff | null>(null);
   const [isReconBusy, setIsReconBusy] = useState(false);
+  const [reconError, setReconError] = useState('');
+  const [isHistoryBusy, setIsHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+
+  const errorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error) return error;
+    return fallback;
+  };
 
   // Real-time Wails Event Listeners
   useEffect(() => {
@@ -99,23 +112,32 @@ export default function App() {
     setProgress(0);
     setIsScanning(true);
 
-    const status = await StartPortScan(
-      target,
-      Number(startPort),
-      Number(endPort),
-      Number(workers),
-      Number(timeoutMs),
-      confirmedScope
-    );
+    try {
+      const status = await StartPortScan(
+        target,
+        Number(startPort),
+        Number(endPort),
+        Number(workers),
+        Number(timeoutMs),
+        confirmedScope
+      );
 
-    if (status !== 'STARTED') {
-      setScanError(status);
+      if (status !== 'STARTED') {
+        setScanError(status);
+        setIsScanning(false);
+      }
+    } catch (error) {
+      setScanError(errorMessage(error, 'Unable to start the port scan. Try again.'));
       setIsScanning(false);
     }
   };
 
   const handleStopScan = async () => {
-    await StopPortScan();
+    try {
+      await StopPortScan();
+    } catch (error) {
+      setScanError(errorMessage(error, 'Unable to stop the port scan. Try again.'));
+    }
   };
 
   const handleBulkAnalyze = async () => {
@@ -123,36 +145,83 @@ export default function App() {
     setAllowPrivateHTTPTargets(false);
     setIsAnalyzing(true);
     setHttpResults([]);
-    const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch);
-    setHttpResults(res || []);
-    setIsAnalyzing(false);
+    setHttpError('');
+    try {
+      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch);
+      setHttpResults(res || []);
+    } catch (error) {
+      setHttpError(errorMessage(error, 'Unable to analyze the URLs. Check the inputs and try again.'));
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const runSubdomainDiscovery = async () => {
     setIsReconBusy(true);
+    setReconError('');
     try {
       setSubdomainResult(await EnumerateSubdomains(subdomain, subdomainWordlist.split(/\r?\n/), useDNSBrute));
-    } finally { setIsReconBusy(false); }
+    } catch (error) {
+      setReconError(errorMessage(error, 'Unable to enumerate subdomains. Try again.'));
+    } finally {
+      setIsReconBusy(false);
+    }
   };
   const runPathFuzzer = async () => {
     setIsReconBusy(true);
+    setReconError('');
     try {
       setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency)));
-    } finally { setIsReconBusy(false); }
+    } catch (error) {
+      setReconError(errorMessage(error, 'Unable to run path checks. Try again.'));
+    } finally {
+      setIsReconBusy(false);
+    }
   };
   const runTLSInspector = async () => {
     setIsReconBusy(true);
-    try { setTlsResult(await InspectTLS(tlsTarget)); }
-    finally { setIsReconBusy(false); }
+    setReconError('');
+    try {
+      setTlsResult(await InspectTLS(tlsTarget));
+    } catch (error) {
+      setReconError(errorMessage(error, 'Unable to inspect TLS. Check the target and try again.'));
+    } finally {
+      setIsReconBusy(false);
+    }
   };
   const runDNSIntelligence = async () => {
     setIsReconBusy(true);
-    try { setDnsResult(await DNSIntelligence(dnsDomain, includeRDAP)); }
-    finally { setIsReconBusy(false); }
+    setReconError('');
+    try {
+      setDnsResult(await DNSIntelligence(dnsDomain, includeRDAP));
+    } catch (error) {
+      setReconError(errorMessage(error, 'Unable to inspect DNS records. Check the domain and try again.'));
+    } finally {
+      setIsReconBusy(false);
+    }
+  };
+  const runIPInformation = async () => {
+    setIsReconBusy(true);
+    setReconError('');
+    try {
+      setIpResult(await IPInformation(ipTarget));
+    } catch (error) {
+      setReconError(errorMessage(error, 'Unable to inspect the IP address. Check the input and try again.'));
+    } finally {
+      setIsReconBusy(false);
+    }
   };
   const refreshHistory = async () => {
-    setHistoryEntries(await GetScanHistory(50));
-    setPortDiff(await DiffLatestPortScans(historyTarget));
+    setIsHistoryBusy(true);
+    setHistoryError('');
+    try {
+      setHistoryEntries(await GetScanHistory(50));
+      setPortDiff(await DiffLatestPortScans(historyTarget));
+    } catch (error) {
+      setHistoryError(errorMessage(error, 'Unable to load local scan history. Try again.'));
+    } finally {
+      setIsHistoryBusy(false);
+    }
   };
   const addSubdomainsToHTTP = () => {
     if (!subdomainResult) return;
@@ -225,7 +294,7 @@ export default function App() {
             Web Audit
           </button>
           {([
-            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['history', 'History'],
+            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'],
           ] as const).map(([tab, label]) => (
             <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab); if (tab === 'history') void refreshHistory(); }}
               className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
@@ -235,6 +304,11 @@ export default function App() {
         </nav>
       </header>
       <main className="mx-auto w-full max-w-screen-2xl">
+      {reconError && (
+        <div role="alert" className="mb-4 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">
+          {reconError}
+        </div>
+      )}
 
       {/* ========================================= */}
       {/* TAB 1: REAL-TIME PORT SCANNER             */}
@@ -459,6 +533,7 @@ export default function App() {
             <p className="text-[11px] leading-relaxed text-slate-500">
               Redirects stay on each URL’s hostname and allowed ports; cross-host redirects and HTTPS-to-HTTP downgrades are blocked. HTTP-to-HTTPS on standard ports is allowed.
             </p>
+            {httpError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{httpError}</p>}
 
             <div className="flex gap-3">
               <button
@@ -674,11 +749,29 @@ export default function App() {
           </div>}
         </div>
       )}
+      {activeTab === 'ip' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <label className="block text-xs text-slate-400">Authorized IPv4 or IPv6 address</label>
+            <input value={ipTarget} onChange={(e) => setIpTarget(e.target.value)} placeholder="8.8.8.8 or 2001:4860:4860::8888" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
+            <button onClick={runIPInformation} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting IP…' : 'Inspect IP Information'}</button>
+            <p className="text-[11px] leading-relaxed text-slate-500">The module shows local address classification, PTR results, and public-IP RDAP registration metadata. It does not provide geolocation or infer an ASN/provider beyond the labeled RDAP response.</p>
+          </div>
+          {ipResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-bold">IP information · {ipResult.ip || ipTarget}</h2>{ipResult.addressClass && <span className="rounded border border-sky-800 bg-sky-950/50 px-2 py-1 text-[11px] text-sky-300">{ipResult.addressClass}</span>}</div>
+            {ipResult.errors?.map((error, index) => <p key={index} className="text-xs text-amber-300">{error}</p>)}
+            <div className="rounded bg-slate-950 p-3"><div className="mb-1 text-[11px] font-bold text-emerald-300">Reverse DNS (PTR)</div>{ipResult.reverseDns.length ? ipResult.reverseDns.map((name) => <div key={name} className="break-all text-xs text-slate-200">{name}</div>) : <div className="text-xs text-slate-600">No PTR name returned</div>}</div>
+            {ipResult.rdap && <div className="rounded bg-slate-950 p-3 text-xs"><div className="mb-1 text-[11px] font-bold text-emerald-300">RDAP registration metadata</div><div>Network handle: {ipResult.rdap.networkHandle || 'unknown'}</div><div>Network name: {ipResult.rdap.name || 'unknown'}</div><div>Registry country field: {ipResult.rdap.country || 'not supplied'}</div><div className="mt-1 text-[11px] text-slate-500">Source: {ipResult.rdap.source}</div></div>}
+            <div className="text-[11px] text-slate-500">Sources: {ipResult.sources.join(' · ')}</div>
+          </div>}
+        </div>
+      )}
       {activeTab === 'history' && (
         <div className="space-y-4">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries).</p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm sm:min-w-64" /><button onClick={() => void refreshHistory()} className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold transition hover:bg-emerald-500 sm:w-auto">Refresh History & Compare Ports</button></div>
+            {historyError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{historyError}</p>}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm sm:min-w-64" /><button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold transition hover:bg-emerald-500 disabled:bg-slate-700 sm:w-auto">{isHistoryBusy ? 'Loading History…' : 'Refresh History & Compare Ports'}</button></div>
           </div>
           {portDiff && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div>}
           <div className="space-y-2">{historyEntries.map((entry) => <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3"><summary className="cursor-pointer break-all text-xs leading-relaxed"><span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}<span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></summary><pre className="mt-3 whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre></details>)}</div>

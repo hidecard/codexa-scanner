@@ -84,6 +84,15 @@ type RDAPInfo struct {
 	NetworkHandle string `json:"networkHandle,omitempty"`
 	Country       string `json:"country,omitempty"`
 	Name          string `json:"name,omitempty"`
+	Source        string `json:"source"`
+}
+type IPInformationResult struct {
+	IP           string    `json:"ip"`
+	AddressClass string    `json:"addressClass"`
+	ReverseDNS  []string  `json:"reverseDns"`
+	RDAP         *RDAPInfo `json:"rdap,omitempty"`
+	Sources      []string  `json:"sources"`
+	Errors       []string  `json:"errors,omitempty"`
 }
 
 func validateDiscoveryDomain(raw string) (string, error) {
@@ -499,8 +508,65 @@ func (a *App) DNSIntelligence(domain string, includeRDAP bool) DNSIntelligenceRe
 	_ = a.saveHistory("dns", d, r)
 	return r
 }
+
+// IPInformation returns source-labeled, non-geolocational metadata for one IP.
+// Public addresses may be enriched through RDAP; private and special-use
+// addresses are classified locally and are never sent to the RDAP service.
+func (a *App) IPInformation(raw string) IPInformationResult {
+	r := IPInformationResult{ReverseDNS: []string{}, Sources: []string{}}
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		r.Errors = append(r.Errors, "enter a valid IPv4 or IPv6 address")
+		return r
+	}
+	r.IP = ip.String()
+	r.AddressClass = classifyIPAddress(ip)
+	r.Sources = append(r.Sources, "Local address classification")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if names, err := net.DefaultResolver.LookupAddr(ctx, r.IP); err == nil {
+		r.ReverseDNS = append(r.ReverseDNS, names...)
+		r.Sources = append(r.Sources, "System DNS resolver (PTR)")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		r.Errors = append(r.Errors, "reverse DNS lookup failed")
+	}
+	if r.AddressClass == "public" {
+		if info, err := lookupRDAP(r.IP); err == nil {
+			r.RDAP = &info
+			r.Sources = append(r.Sources, info.Source)
+		} else {
+			r.Errors = append(r.Errors, "RDAP lookup failed: "+err.Error())
+		}
+	} else {
+		r.Errors = append(r.Errors, "RDAP is not queried for private or special-use addresses")
+	}
+	sortStrings(r.ReverseDNS)
+	_ = a.saveHistory("ip", r.IP, r)
+	return r
+}
+
+func classifyIPAddress(ip net.IP) string {
+	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() {
+		return "special-use"
+	}
+	if ip.IsLoopback() {
+		return "loopback"
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return "link-local"
+	}
+	if ip.IsPrivate() {
+		return "private"
+	}
+	if ip.IsGlobalUnicast() {
+		return "public"
+	}
+	return "special-use"
+}
+
 func lookupRDAP(ip string) (RDAPInfo, error) {
-	out := RDAPInfo{IP: ip}
+	out := RDAPInfo{IP: ip, Source: "rdap.org (RDAP referral)"}
 	client := &http.Client{Timeout: 4 * time.Second, CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return fmt.Errorf("stopped after 5 RDAP redirects")

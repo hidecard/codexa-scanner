@@ -38,6 +38,10 @@ export function InspectTLS(arg1) {
   return window['go']['main']['App']['InspectTLS'](arg1);
 }
 
+export function IPInformation(arg1) {
+  return window['go']['main']['App']['IPInformation'](arg1);
+}
+
 export function StartPortScan(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['StartPortScan'](arg1, arg2, arg3, arg4, arg5, arg6);
 }

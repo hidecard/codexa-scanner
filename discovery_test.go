@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,5 +192,25 @@ func TestFuzzPathsFiltersCustomNotFoundAndUsesHEADOnly(t *testing.T) {
 	encoded := result.Paths[0].URL
 	if strings.Contains(encoded, "must never") || strings.Contains(encoded, "custom not-found") {
 		t.Fatalf("response body leaked: %q", encoded)
+	}
+}
+
+func TestClassifyIPAddressDoesNotTreatPrivateOrSpecialAddressesAsPublic(t *testing.T) {
+	tests := []struct {
+		address string
+		class   string
+	}{
+		{"8.8.8.8", "public"},
+		{"2001:4860:4860::8888", "public"},
+		{"192.168.1.10", "private"},
+		{"fd00::10", "private"},
+		{"127.0.0.1", "loopback"},
+		{"169.254.1.1", "link-local"},
+		{"224.0.0.1", "special-use"},
+	}
+	for _, test := range tests {
+		if got := classifyIPAddress(net.ParseIP(test.address)); got != test.class {
+			t.Errorf("classifyIPAddress(%q) = %q, want %q", test.address, got, test.class)
+		}
 	}
 }
