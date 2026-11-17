@@ -598,7 +598,7 @@ export default function App() {
                         <span>Powered-By: <strong className="text-amber-300">{res.poweredBy}</strong></span>
                       )}
                     </div>
-                    {res.redirects?.length > 0 && (
+                    {res.redirects && res.redirects.length > 0 && (
                       <details className="rounded-lg border border-slate-800 bg-slate-950 p-3">
                         <summary className="cursor-pointer text-xs font-semibold text-slate-300">Redirect chain ({res.redirects.length} hop{res.redirects.length === 1 ? '' : 's'})</summary>
                         <div className="mt-2 space-y-2">
