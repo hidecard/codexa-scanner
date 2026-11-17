@@ -161,30 +161,34 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 px-3 py-4 font-sans sm:px-5 sm:py-6 lg:px-8 app-shell">
       {/* Top Navbar */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
-        <div className="flex items-center gap-3">
+      <header className="mb-5 flex flex-col gap-4 border-b border-slate-800 pb-4 sm:mb-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${isScanning || isAnalyzing || isReconBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} />
-          <div>
-            <h1 className="text-lg font-bold tracking-wider text-emerald-400">CODEXA SCANNER</h1>
-            <p className="text-xs text-slate-500">Authorized Network & Web Security Assessment</p>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold tracking-[0.14em] text-emerald-400 sm:text-lg">CODEXA SCANNER</h1>
+            <p className="text-[11px] leading-relaxed text-slate-500 sm:text-xs">Authorized Network & Web Security Assessment</p>
           </div>
         </div>
 
-        <div className="flex max-w-[64%] flex-wrap justify-end gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[68%] lg:grid-cols-4 xl:grid-cols-7">
           <button
+            type="button"
             onClick={() => setActiveTab('scanner')}
-            className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${
-              activeTab === 'scanner' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+            aria-pressed={activeTab === 'scanner'}
+            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
+              activeTab === 'scanner' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
             }`}
           >
             Ports
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab('analyzer')}
-            className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${
-              activeTab === 'analyzer' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+            aria-pressed={activeTab === 'analyzer'}
+            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
+              activeTab === 'analyzer' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
             }`}
           >
             Web Audit
@@ -192,27 +196,28 @@ export default function App() {
           {([
             ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['history', 'History'],
           ] as const).map(([tab, label]) => (
-            <button key={tab} onClick={() => { setActiveTab(tab); if (tab === 'history') void refreshHistory(); }}
-              className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition ${activeTab === tab ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab); if (tab === 'history') void refreshHistory(); }}
+              className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
               {label}
             </button>
           ))}
-        </div>
-      </div>
+        </nav>
+      </header>
+      <main className="mx-auto w-full max-w-screen-2xl">
 
       {/* ========================================= */}
       {/* TAB 1: REAL-TIME PORT SCANNER             */}
       {/* ========================================= */}
       {activeTab === 'scanner' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-6 gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <div className="col-span-2">
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:grid-cols-3 sm:p-4 xl:grid-cols-6">
+            <div className="col-span-full sm:col-span-3 xl:col-span-2">
               <label className="block text-xs text-slate-400 mb-1">Target IP / Hostname</label>
               <input
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 disabled={isScanning}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 outline-none"
+                className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
 
@@ -223,7 +228,7 @@ export default function App() {
                 value={startPort}
                 onChange={(e) => setStartPort(Number(e.target.value))}
                 disabled={isScanning}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
 
@@ -234,7 +239,7 @@ export default function App() {
                 value={endPort}
                 onChange={(e) => setEndPort(Number(e.target.value))}
                 disabled={isScanning}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
 
@@ -245,7 +250,7 @@ export default function App() {
                 value={workers}
                 onChange={(e) => setWorkers(Number(e.target.value))}
                 disabled={isScanning}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
 
@@ -256,24 +261,24 @@ export default function App() {
                 value={timeoutMs}
                 onChange={(e) => setTimeoutMs(Number(e.target.value))}
                 disabled={isScanning}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
           </div>
 
           {/* Action Buttons & Progress */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             {!isScanning ? (
               <button
                 onClick={handleStartScan}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-xl text-sm transition"
+                className="min-h-11 flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-950"
               >
                 Start Live Scan
               </button>
             ) : (
               <button
                 onClick={handleStopScan}
-                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold py-2.5 rounded-xl text-sm transition"
+                className="min-h-11 flex-1 rounded-xl bg-rose-600 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-slate-950"
               >
                 Stop Scan ({progress}%)
               </button>
@@ -283,13 +288,13 @@ export default function App() {
               <>
                 <button
                   onClick={() => ExportPortsCSV(findings)}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold"
+                  className="min-h-11 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs font-semibold hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
                 >
                   Export CSV
                 </button>
                 <button
                   onClick={() => ExportJSON('port_scan.json', JSON.stringify(findings))}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold"
+                  className="min-h-11 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs font-semibold hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
                 >
                   Export JSON
                 </button>
@@ -310,14 +315,14 @@ export default function App() {
           {scanError && <p className="text-rose-400 text-xs">{scanError}</p>}
 
           {/* Real-time Results Table */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-slate-900/80 border-b border-slate-800 flex justify-between text-xs text-slate-400">
+          <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+            <div className="flex flex-col gap-1 border-b border-slate-800 bg-slate-900/80 px-4 py-3 text-xs text-slate-400 sm:flex-row sm:justify-between">
               <span>Live Open Ports & Service Banners</span>
               <span className="text-emerald-400 font-bold">{findings.length} Open Ports Found</span>
             </div>
 
-            <div className="max-h-80 overflow-y-auto">
-              <table className="w-full text-left text-xs">
+            <div>
+              <table className="responsive-port-table w-full text-left text-xs">
                 <thead className="bg-slate-950 text-slate-400 sticky top-0">
                   <tr>
                     <th className="py-2.5 px-4">PORT</th>
@@ -336,14 +341,14 @@ export default function App() {
                   ) : (
                     findings.map((item) => (
                       <tr key={item.port} className="hover:bg-slate-800/40">
-                        <td className="py-2.5 px-4 font-bold text-emerald-400">{item.port}/tcp</td>
-                        <td className="py-2.5 px-4">
+                        <td data-label="Port" className="py-2.5 px-4 font-bold text-emerald-400">{item.port}/tcp</td>
+                        <td data-label="State" className="py-2.5 px-4">
                           <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded text-[10px]">
                             OPEN
                           </span>
                         </td>
-                        <td className="py-2.5 px-4 text-sky-300">{item.service}</td>
-                        <td className="py-2.5 px-4 text-slate-300 truncate max-w-md">
+                        <td data-label="Service" className="py-2.5 px-4 text-sky-300">{item.service}</td>
+                        <td data-label="Banner / version" className="break-all py-2.5 px-4 text-slate-300 sm:truncate sm:break-normal sm:max-w-md">
                           {item.banner || <span className="text-slate-600">-</span>}
                         </td>
                       </tr>
@@ -362,7 +367,7 @@ export default function App() {
       {activeTab === 'analyzer' && (
         <div className="space-y-4">
           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <label className="text-xs text-slate-400">Authorized HTTP/HTTPS URLs (one per line, max 100)</label>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400">Threads:</span>
@@ -380,7 +385,7 @@ export default function App() {
               value={bulkUrls}
               onChange={(e) => setBulkUrls(e.target.value)}
               placeholder="https://your-authorized-site.example&#10;http://your-lab-host.example"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs font-mono focus:border-emerald-500 outline-none"
+              className="min-h-28 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
             />
 
             <div className="flex gap-3">
@@ -404,12 +409,12 @@ export default function App() {
           </div>
 
           {/* Results Cards */}
-          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                {httpResults.map((res, idx) => (
-              <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-sm font-bold text-slate-200">{res.url}</span>
+          <div className="space-y-3">
+            {httpResults.map((res, idx) => (
+              <div key={idx} className="min-w-0 space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+                    <span className="min-w-0 break-all font-mono text-sm font-bold text-slate-200">{res.url}</span>
                     {!res.error && (
                       <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
                         HTTP {res.statusCode}
@@ -438,7 +443,7 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+                    <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-400">
                       <span>Title: <strong className="text-slate-200">{res.title || 'N/A'}</strong></span>
                       <span>Server: <strong className="text-amber-300">{res.server || 'Hidden'}</strong></span>
                       {res.finalUrl && res.finalUrl !== res.url && <span>Final URL: <strong className="text-slate-200">{res.finalUrl}</strong></span>}
@@ -520,10 +525,10 @@ export default function App() {
             <button onClick={runSubdomainDiscovery} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Enumerating…' : 'Query Certificate Transparency'}</button>
             <p className="text-[11px] text-slate-500">Passive results come from crt.sh. DNS wordlist checks are optional active queries; use only within authorized scope.</p>
           </div>
-          {subdomainResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-            <div className="flex items-center justify-between"><h2 className="text-sm font-bold">{subdomainResult.names.length} names · {subdomainResult.domain}</h2><button onClick={addSubdomainsToHTTP} disabled={!subdomainResult.names.length} className="rounded border border-slate-700 px-3 py-1 text-xs text-emerald-300 disabled:opacity-40">Send first 100 to Web Audit</button></div>
+          {subdomainResult && <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><h2 className="break-all text-sm font-bold">{subdomainResult.names.length} names · {subdomainResult.domain}</h2><button onClick={addSubdomainsToHTTP} disabled={!subdomainResult.names.length} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-emerald-300 transition hover:bg-slate-800 disabled:opacity-40">Send first 100 to Web Audit</button></div>
             {subdomainResult.errors?.map((e, i) => <p key={i} className="text-xs text-amber-300">{e}</p>)}
-            <div className="max-h-72 overflow-auto space-y-1 font-mono text-xs">{subdomainResult.names.map((name) => <div key={name} className="rounded bg-slate-950 px-3 py-1.5 text-slate-200">{name}</div>)}</div>
+            <div className="space-y-1 font-mono text-xs">{subdomainResult.names.map((name) => <div key={name} className="break-all rounded bg-slate-950 px-3 py-1.5 text-slate-200">{name}</div>)}</div>
           </div>}
         </div>
       )}
@@ -532,15 +537,15 @@ export default function App() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <label className="block text-xs text-slate-400">Authorized base URL</label>
             <input value={fuzzBaseURL} onChange={(e) => setFuzzBaseURL(e.target.value)} placeholder="https://your-site.example" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
-            <div className="flex items-center justify-between"><label className="text-xs text-slate-400">Path wordlist (max 500)</label><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs" /></div>
+            <div className="flex items-center justify-between gap-3"><label className="text-xs text-slate-400">Path wordlist (max 500)</label><input type="number" min={1} max={20} value={fuzzConcurrency} onChange={(e) => setFuzzConcurrency(Number(e.target.value))} className="w-20 shrink-0 rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs" /></div>
             <textarea rows={7} value={fuzzWordlist} onChange={(e) => setFuzzWordlist(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono" />
             <button onClick={runPathFuzzer} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Checking paths…' : 'Run HEAD-only Path Checks'}</button>
             <p className="text-[11px] text-slate-500">Sends bounded HEAD requests only, follows no redirects, and never reads or displays response bodies. A randomized missing-path check filters likely catch-all responses.</p>
           </div>
-          {fuzzResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2">
+          {fuzzResult && <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
             {fuzzResult.error && <p className="text-xs text-rose-300">{fuzzResult.error}</p>}
-            <h2 className="text-sm font-bold">{fuzzResult.paths.length} candidate paths · {fuzzResult.baseUrl}</h2>
-            {fuzzResult.paths.map((item) => <div key={item.url} className="flex flex-wrap justify-between gap-2 rounded bg-slate-950 px-3 py-2 font-mono text-xs"><span>{item.url}</span><span className="text-emerald-300">HTTP {item.statusCode} · {item.contentLength >= 0 ? `${item.contentLength} B` : 'size unknown'}</span></div>)}
+            <h2 className="break-all text-sm font-bold">{fuzzResult.paths.length} candidate paths · {fuzzResult.baseUrl}</h2>
+            {fuzzResult.paths.map((item) => <div key={item.url} className="flex flex-wrap justify-between gap-2 rounded bg-slate-950 px-3 py-2 font-mono text-xs"><span className="min-w-0 break-all">{item.url}</span><span className="shrink-0 text-emerald-300">HTTP {item.statusCode} · {item.contentLength >= 0 ? `${item.contentLength} B` : 'size unknown'}</span></div>)}
           </div>}
         </div>
       )}
@@ -553,7 +558,7 @@ export default function App() {
             <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. Certificate details are independently checked against the system trust store; legacy-protocol support depends on local Go crypto policy.</p>
           </div>
           {tlsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-            <h2 className="text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
+            <h2 className="break-all text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
             {tlsResult.validationError && <p className="break-all text-xs text-amber-300">{tlsResult.validationError}</p>}
             <div className="grid gap-2 text-xs md:grid-cols-2">
               <div className="rounded bg-slate-950 p-3">Negotiated: {tlsResult.tlsVersion || 'Unavailable'} · {tlsResult.cipherSuite || 'No cipher'}</div>
@@ -587,12 +592,13 @@ export default function App() {
         <div className="space-y-4">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <p className="text-xs text-slate-400">Scan results are stored locally in the operating system's user configuration folder (up to 2,000 entries).</p>
-            <div className="flex flex-wrap gap-2"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-w-64 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><button onClick={() => void refreshHistory()} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold">Refresh History & Compare Ports</button></div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"><input value={historyTarget} onChange={(e) => setHistoryTarget(e.target.value)} placeholder="target hostname" className="min-h-11 min-w-0 w-full flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm sm:min-w-64" /><button onClick={() => void refreshHistory()} className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold transition hover:bg-emerald-500 sm:w-auto">Refresh History & Compare Ports</button></div>
           </div>
           {portDiff && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div>}
-          <div className="max-h-[32rem] space-y-2 overflow-auto">{historyEntries.map((entry) => <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3"><summary className="cursor-pointer text-xs"><span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}<span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></summary><pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre></details>)}</div>
+          <div className="space-y-2">{historyEntries.map((entry) => <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3"><summary className="cursor-pointer break-all text-xs leading-relaxed"><span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}<span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span></summary><pre className="mt-3 whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre></details>)}</div>
         </div>
       )}
+      </main>
       <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">Develop by H!D3-C4rD</footer>
     </div>
   );
