@@ -1452,6 +1452,8 @@ ${rows || '<p>No results.</p>'}
               {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
                 <div className="mt-4 space-y-4 text-sm">
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
+                  <section><h4 className="font-semibold text-emerald-300">Root cause</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'rootCause')}</p></section>
+                  <section><h4 className="font-semibold text-rose-300">Potential impact</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'impact')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Common developer mistakes</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{guideList(g,'commonMistakes').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>
                   <section><h4 className="font-semibold text-emerald-300">Attack scenario</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'attackScenario')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Step-by-step safe walkthrough</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'attackSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
@@ -1462,15 +1464,18 @@ ${rows || '<p>No results.</p>'}
                     <div className="mt-2 flex flex-wrap gap-1">{stacks.map(s=> <button key={s} type="button" onClick={()=>setPlaybookStack(s)} className={`rounded border px-2 py-1 text-xs ${playbookStack===s?'border-emerald-600 bg-emerald-950/40 text-emerald-300':'border-slate-700 text-slate-300'}`}>{s}</button>)}</div>
                     {stackFix ? (
                       <div className="mt-3 space-y-2">
-                        <div className="text-xs text-slate-400">Target file/location: <span className="font-mono text-slate-200">{stackFix.file}</span></div>
+                        <div className="text-xs text-slate-400">Target file/path: <span className="font-mono text-slate-200">{stackFix.file}</span></div>
+                        <div className="text-xs text-slate-400">Code location: <span className="text-slate-200">{stackFix.location}</span></div>
                         <div><div className="text-xs font-semibold text-rose-300">Before</div><pre className="mt-1 whitespace-pre-wrap break-all rounded border border-slate-800 bg-slate-950 p-2 text-[11px] text-slate-200">{stackFix.before}</pre></div>
                         <div><div className="text-xs font-semibold text-emerald-300">After</div><pre className="mt-1 whitespace-pre-wrap break-all rounded border border-slate-800 bg-slate-950 p-2 text-[11px] text-slate-200">{stackFix.after}</pre></div>
                         <div><div className="text-xs font-semibold text-sky-300">Deploy / apply</div><p className="mt-1 whitespace-pre-wrap text-xs text-slate-300">{stackFix.deploy}</p></div>
                         <div><div className="text-xs font-semibold text-sky-300">Verify</div><p className="mt-1 whitespace-pre-wrap text-xs text-slate-300">{stackFix.verify}</p></div>
+                        <div><div className="text-xs font-semibold text-amber-300">Rollback / recovery</div><p className="mt-1 whitespace-pre-wrap text-xs text-slate-300">{stackFix.rollback}</p></div>
                       </div>
                     ) : <p className="mt-2 text-xs text-slate-400">No stack-specific snippet available for this stack.</p>}
                   </section>
                   <section><h4 className="font-semibold text-emerald-300">Verification checklist</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'verificationSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
+                  {!!g.references?.length && <section><h4 className="font-semibold text-emerald-300">Further reading</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{g.references.map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>}
                 </div>
               )}
             </div>

@@ -17,11 +17,13 @@ type BilingualText struct {
 }
 
 type StackFix struct {
-	File   string `json:"file"`
-	Before string `json:"before"`
-	After  string `json:"after"`
-	Deploy string `json:"deploy"`
-	Verify string `json:"verify"`
+	File     string `json:"file"`
+	Location string `json:"location"`
+	Before   string `json:"before"`
+	After    string `json:"after"`
+	Deploy   string `json:"deploy"`
+	Verify   string `json:"verify"`
+	Rollback string `json:"rollback"`
 }
 
 // UnmarshalJSON keeps the embedded knowledge base backward-compatible with
@@ -36,11 +38,13 @@ func (s *StackFix) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var object struct {
-		File   json.RawMessage `json:"file"`
-		Before json.RawMessage `json:"before"`
-		After  json.RawMessage `json:"after"`
-		Deploy json.RawMessage `json:"deploy"`
-		Verify json.RawMessage `json:"verify"`
+		File     json.RawMessage `json:"file"`
+		Location json.RawMessage `json:"location"`
+		Before   json.RawMessage `json:"before"`
+		After    json.RawMessage `json:"after"`
+		Deploy   json.RawMessage `json:"deploy"`
+		Verify   json.RawMessage `json:"verify"`
+		Rollback json.RawMessage `json:"rollback"`
 	}
 	if err := json.Unmarshal(data, &object); err != nil {
 		return err
@@ -58,7 +62,7 @@ func (s *StackFix) UnmarshalJSON(data []byte) error {
 		_ = json.Unmarshal(raw, &value)
 		return value
 	}
-	*s = StackFix{File: decode(object.File), Before: decode(object.Before), After: decode(object.After), Deploy: decode(object.Deploy), Verify: decode(object.Verify)}
+	*s = StackFix{File: decode(object.File), Location: decode(object.Location), Before: decode(object.Before), After: decode(object.After), Deploy: decode(object.Deploy), Verify: decode(object.Verify), Rollback: decode(object.Rollback)}
 	return nil
 }
 
@@ -66,12 +70,15 @@ type RemediationEntry struct {
 	ID                 string              `json:"id"`
 	Title              BilingualText       `json:"title"`
 	Mechanism          BilingualText       `json:"mechanism"`
+	RootCause          BilingualText       `json:"rootCause"`
+	Impact             BilingualText       `json:"impact"`
 	CommonMistakes     BilingualTextList   `json:"commonMistakes"`
 	AttackScenario     BilingualText       `json:"attackScenario"`
 	AttackSteps        BilingualTextList   `json:"attackSteps"`
 	WhereToFix         BilingualText       `json:"whereToFix"`
 	VerificationSteps  BilingualTextList   `json:"verificationSteps"`
 	FalsePositiveNotes BilingualText       `json:"falsePositiveNotes"`
+	References         []string            `json:"references"`
 	Stacks             map[string]StackFix `json:"stacks"`
 }
 

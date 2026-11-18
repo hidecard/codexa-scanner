@@ -82,12 +82,12 @@ func TestEmbeddedRemediationKnowledgeCoverage(t *testing.T) {
 		}
 	}
 	for _, entry := range kb.Entries {
-		if entry.ID == "" || entry.Title.En == "" || entry.Title.My == "" || entry.Mechanism.En == "" || entry.Mechanism.My == "" || len(entry.CommonMistakes.En) < 4 || len(entry.CommonMistakes.My) < 4 || entry.AttackScenario.En == "" || entry.AttackScenario.My == "" || len(entry.AttackSteps.En) < 4 || len(entry.AttackSteps.My) < 4 || entry.WhereToFix.En == "" || entry.WhereToFix.My == "" || len(entry.VerificationSteps.En) < 4 || len(entry.VerificationSteps.My) < 4 || entry.FalsePositiveNotes.En == "" || entry.FalsePositiveNotes.My == "" {
+		if entry.ID == "" || entry.Title.En == "" || entry.Title.My == "" || entry.Mechanism.En == "" || entry.Mechanism.My == "" || entry.RootCause.En == "" || entry.RootCause.My == "" || entry.Impact.En == "" || entry.Impact.My == "" || len(entry.References) == 0 || len(entry.CommonMistakes.En) < 4 || len(entry.CommonMistakes.My) < 4 || entry.AttackScenario.En == "" || entry.AttackScenario.My == "" || len(entry.AttackSteps.En) < 4 || len(entry.AttackSteps.My) < 4 || entry.WhereToFix.En == "" || entry.WhereToFix.My == "" || len(entry.VerificationSteps.En) < 4 || len(entry.VerificationSteps.My) < 4 || entry.FalsePositiveNotes.En == "" || entry.FalsePositiveNotes.My == "" {
 			t.Fatalf("incomplete bilingual remediation entry %q", entry.ID)
 		}
 		for _, stack := range kb.Stacks {
 			fix, ok := entry.Stacks[stack]
-			if !ok || fix.File == "" || fix.Before == "" || fix.After == "" || fix.Deploy == "" || fix.Verify == "" {
+			if !ok || fix.File == "" || fix.Location == "" || fix.Before == "" || fix.After == "" || fix.Deploy == "" || fix.Verify == "" || fix.Rollback == "" {
 				t.Fatalf("incomplete %q remediation for stack %q", entry.ID, stack)
 			}
 		}
