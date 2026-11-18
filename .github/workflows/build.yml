@@ -93,7 +93,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: macos-13
+            runner: macos-15
             wails_platform: darwin/amd64
           - arch: arm64
             runner: macos-15
