@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   StartPortScan,
   StopPortScan,
+  StartCIDRSweep,
   AnalyzeBulkURLs,
   ExportJSON,
   ExportPortsCSV,
@@ -44,6 +45,18 @@ export default function App() {
   const [scanError, setScanError] = useState('');
   const [resolvedScanTarget, setResolvedScanTarget] = useState('');
   const [httpError, setHttpError] = useState('');
+
+  // --- CIDR Sweep States ---
+  const [cidrTarget, setCidrTarget] = useState('192.168.1.0/24');
+  const [cidrStartPort, setCidrStartPort] = useState(1);
+  const [cidrEndPort, setCidrEndPort] = useState(1024);
+  const [cidrScopeConfirmed, setCidrScopeConfirmed] = useState(false);
+  const [cidrWorkers, setCidrWorkers] = useState(10);
+  const [cidrTimeoutMs, setCidrTimeoutMs] = useState(800);
+  const [isCIDRScanning, setIsCIDRScanning] = useState(false);
+  const [cidrProgress, setCidrProgress] = useState(0);
+  const [cidrResults, setCidrResults] = useState<main.CIDRSweepResult | null>(null);
+  const [cidrError, setCidrError] = useState('');
 
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
@@ -88,6 +101,9 @@ export default function App() {
   const [fuzzJitterMs, setFuzzJitterMs] = useState(0);
   const [requestUserAgent, setRequestUserAgent] = useState('');
   const [requestTimeout, setRequestTimeout] = useState(10);
+  const [customHeaders, setCustomHeaders] = useState('Authorization: Bearer ***\nCookie: session=***');
+  const [customHeadersOpen, setCustomHeadersOpen] = useState(false);
+  const [proxyURL, setProxyURL] = useState('');
   const [isPaused, setIsPaused] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
@@ -102,6 +118,21 @@ export default function App() {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error) return error;
     return fallback;
+  };
+
+  const parseCustomHeaders = (input: string): { [key: string]: string } => {
+    const out: { [key: string]: string } = {};
+    for (const rawLine of input.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const name = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (!name || !value) continue;
+      out[name] = value;
+    }
+    return out;
   };
 
   // Real-time Wails Event Listeners
@@ -130,6 +161,20 @@ export default function App() {
     EventsOn('scan:error', (message: string) => setScanError(message));
     EventsOn('scan:control', (state: string) => setIsPaused(state === 'paused'));
 
+    // CIDR Sweep events
+    EventsOn('cidr:progress', (pct: number) => setCidrProgress(pct));
+    EventsOn('cidr:sweep-done', (result: main.CIDRSweepResult) => {
+      setIsCIDRScanning(false);
+      setIsPaused(false);
+      setCidrResults(result);
+      setCidrProgress(100);
+    });
+    EventsOn('scan:status', (status: string) => {
+      if (status === 'running' && isCIDRScanning) {
+        // already running
+      }
+    });
+
     return () => {
       EventsOff('port:found');
       EventsOff('scan:progress');
@@ -137,6 +182,8 @@ export default function App() {
       EventsOff('scan:target');
       EventsOff('scan:error');
       EventsOff('scan:control');
+      EventsOff('cidr:progress');
+      EventsOff('cidr:sweep-done');
     };
   }, []);
 
@@ -222,6 +269,42 @@ export default function App() {
     }
   };
 
+  const handleStartCIDRSweep = async () => {
+    const confirmedScope = cidrScopeConfirmed;
+    setCidrScopeConfirmed(false);
+    setCidrError('');
+    setCidrResults(null);
+    setCidrProgress(0);
+    setIsCIDRScanning(true);
+
+    try {
+      const status = await StartCIDRSweep(
+        cidrTarget,
+        Number(cidrStartPort),
+        Number(cidrEndPort),
+        Number(cidrWorkers),
+        Number(cidrTimeoutMs),
+        confirmedScope
+      );
+
+      if (status !== 'STARTED') {
+        setCidrError(status);
+        setIsCIDRScanning(false);
+      }
+    } catch (error) {
+      setCidrError(errorMessage(error, 'Unable to start the CIDR sweep. Try again.'));
+      setIsCIDRScanning(false);
+    }
+  };
+
+  const handleStopCIDRSweep = async () => {
+    try {
+      await StopPortScan();
+    } catch (error) {
+      setCidrError(errorMessage(error, 'Unable to stop the CIDR sweep. Try again.'));
+    }
+  };
+
   const handleBulkAnalyze = async () => {
     const allowPrivateForBatch = allowPrivateHTTPTargets;
     setAllowPrivateHTTPTargets(false);
@@ -229,7 +312,8 @@ export default function App() {
     setHttpResults([]);
     setHttpError('');
     try {
-      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs), Number(httpRps), Number(httpJitterMs), requestUserAgent, Number(requestTimeout));
+      const headers = parseCustomHeaders(customHeaders);
+      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs), Number(httpRps), Number(httpJitterMs), requestUserAgent, Number(requestTimeout), headers, proxyURL);
       setHttpResults(res || []);
     } catch (error) {
       setHttpError(errorMessage(error, 'Unable to analyze the URLs. Check the inputs and try again.'));
@@ -253,7 +337,7 @@ export default function App() {
     setIsReconBusy(true);
     setReconError('');
     try {
-      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency), Number(fuzzDelayMs), Number(fuzzRps), Number(fuzzJitterMs), requestUserAgent, Number(requestTimeout)));
+      setFuzzResult(await FuzzPaths(fuzzBaseURL, fuzzWordlist.split(/\r?\n/), Number(fuzzConcurrency), Number(fuzzDelayMs), Number(fuzzRps), Number(fuzzJitterMs), requestUserAgent, Number(requestTimeout), proxyURL));
     } catch (error) {
       setReconError(errorMessage(error, 'Unable to run path checks. Try again.'));
     } finally {
@@ -888,7 +972,182 @@ ${rows || '<p>No results.</p>'}
                   )}
                 </tbody>
               </table>
+</div>
+          </div>
+
+          {/* CIDR /24 Sweep Section */}
+          <div className="border-t border-slate-800 pt-4 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-300">CIDR /24 Subnet Sweep (Bounded, Opt-in)</h3>
+            <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3 sm:grid-cols-3 sm:p-4 xl:grid-cols-6">
+              <div className="col-span-full sm:col-span-3 xl:col-span-2">
+                <label className="block text-xs text-slate-400 mb-1">Target CIDR (IPv4 /24 only)</label>
+                <input
+                  value={cidrTarget}
+                  onChange={(e) => { setCidrTarget(e.target.value); setCidrScopeConfirmed(false); }}
+                  disabled={isCIDRScanning}
+                  placeholder="192.168.1.0/24"
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Start Port</label>
+                <input
+                  type="number"
+                  value={cidrStartPort}
+                  onChange={(e) => { setCidrStartPort(Number(e.target.value)); setCidrScopeConfirmed(false); }}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">End Port</label>
+                <input
+                  type="number"
+                  value={cidrEndPort}
+                  onChange={(e) => { setCidrEndPort(Number(e.target.value)); setCidrScopeConfirmed(false); }}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Workers (max 50)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={cidrWorkers}
+                  onChange={(e) => setCidrWorkers(Number(e.target.value))}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Timeout (ms, max 30,000)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30000}
+                  value={cidrTimeoutMs}
+                  onChange={(e) => setCidrTimeoutMs(Number(e.target.value))}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
             </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-xs leading-relaxed text-slate-300">
+              <input
+                type="checkbox"
+                checked={cidrScopeConfirmed}
+                onChange={(e) => setCidrScopeConfirmed(e.target.checked)}
+                disabled={isCIDRScanning}
+                className="mt-0.5 accent-emerald-500"
+              />
+              <span>
+                <span className="font-semibold text-amber-200">Scope confirmation required.</span>{' '}
+                I own or have permission to scan this entire /24 CIDR range and port range. Authorized private and lab networks only.
+              </span>
+            </label>
+
+            {/* Action Buttons & Progress */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              {!isCIDRScanning ? (
+                <button
+                  onClick={handleStartCIDRSweep}
+                  disabled={!cidrScopeConfirmed}
+                  className="min-h-11 flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-emerald-600"
+                >
+                  Start CIDR /24 Sweep
+                </button>
+              ) : (
+                <button
+                  onClick={handleStopCIDRSweep}
+                  className="min-h-11 flex-1 rounded-xl bg-rose-600 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+                >
+                  Stop Sweep ({cidrProgress}%)
+                </button>
+              )}
+
+              {cidrResults && cidrResults.liveHosts > 0 && (
+                <>
+                  <button
+                    onClick={() => ExportJSON(`cidr_sweep_${cidrTarget.replace(/\//g, '_')}.json`, JSON.stringify(cidrResults))}
+                    className="min-h-11 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs font-semibold hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                  >
+                    Export JSON
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Progress Bar */}
+            {(isCIDRScanning || cidrProgress > 0) && (
+              <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+                <div
+                  className="bg-emerald-500 h-2 transition-all duration-200"
+                  style={{ width: `${cidrProgress}%` }}
+                />
+              </div>
+            )}
+
+            {cidrError && <p className="text-rose-400 text-xs">{cidrError}</p>}
+
+            {/* CIDR Sweep Results */}
+            {cidrResults && (
+              <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+                <div className="flex flex-col gap-1 border-b border-slate-800 bg-slate-900/80 px-4 py-3 text-xs text-slate-400 sm:flex-row sm:justify-between">
+                  <span>CIDR Sweep Results · {cidrResults.cidr}</span>
+                  <span className="text-emerald-400 font-bold">
+                    {cidrResults.liveHosts} Live Hosts / {cidrResults.scanned} Scanned
+                  </span>
+                </div>
+                <div className="max-h-96 overflow-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-4">IP</th>
+                        <th className="py-2.5 px-4">HOSTNAME</th>
+                        <th className="py-2.5 px-4">OPEN PORTS</th>
+                        <th className="py-2.5 px-4">SERVICES / BANNERS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {cidrResults.hosts.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-slate-500 font-sans">
+                            {isCIDRScanning ? 'Sweeping subnet...' : 'No live hosts found.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        cidrResults.hosts
+                          .filter((h) => h.ports.length > 0)
+                          .map((host) => (
+                            <tr key={host.ip} className="hover:bg-slate-800/40">
+                              <td data-label="IP" className="py-2.5 px-4 font-bold text-emerald-400">{host.ip}</td>
+                              <td data-label="Hostname" className="py-2.5 px-4 text-sky-300">{host.hostname || <span className="text-slate-600">-</span>}</td>
+                              <td data-label="Open Ports" className="py-2.5 px-4 text-amber-300">
+                                {host.ports.map((p) => p.port).join(', ')}
+                              </td>
+                              <td data-label="Services" className="break-all py-2.5 px-4 text-slate-300 sm:truncate sm:max-w-md">
+                                {host.ports.map((p) => (
+                                  <div key={p.port} className="whitespace-nowrap">
+                                    <span className="text-sky-300">{p.service}</span>:{p.port}/tcp{' '}
+                                    {p.banner ? <span className="text-slate-400">{p.banner}</span> : <span className="text-slate-600">-</span>}
+                                  </div>
+                                ))}
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -927,6 +1186,46 @@ ${rows || '<p>No results.</p>'}
                 <span className="text-[11px] text-slate-500">Applies to Web Audit &amp; Path Fuzzer.</span>
               </div>
             </div>
+
+            <details className="rounded-lg border border-slate-800 bg-slate-950/40">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100">
+                Authorized session headers (optional, one-shot scope)
+              </summary>
+              <div className="space-y-2 border-t border-slate-800 p-3">
+                <textarea
+                  rows={3}
+                  value={customHeaders}
+                  onChange={(e) => setCustomHeaders(e.target.value)}
+                  disabled={isAnalyzing}
+                  placeholder={'Authorization: Bearer ***\nCookie: session=***\nX-API-Key: ***'}
+                  className="min-h-24 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  One line per header as <code className="text-slate-400">Name: value</code>. For authorized authenticated testing only. Sensitive header values (Authorization, Cookie, X-API-Key, etc.) are redacted before persistence and export; hop-by-hop and transport-controlled headers are ignored. This is a per-run opt-in and does not change target-scope validation.
+                </p>
+              </div>
+            </details>
+
+            <details className="rounded-lg border border-slate-800 bg-slate-950/40">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100">
+                Opt-in proxy routing (optional, one-shot scope)
+              </summary>
+              <div className="space-y-2 border-t border-slate-800 p-3">
+                <label className="text-xs text-slate-400">Proxy URL (HTTP/HTTPS/SOCKS5)
+                  <input
+                    type="text"
+                    value={proxyURL}
+                    onChange={(e) => setProxyURL(e.target.value)}
+                    disabled={isAnalyzing}
+                    placeholder="http://127.0.0.1:8080  |  socks5://127.0.0.1:1080  |  https://proxy.example:8443"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </label>
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Route Web Audit & Path Fuzzer traffic through a local inspection proxy (e.g., Burp, OWASP ZAP, mitmproxy). Supported schemes: <code className="text-slate-400">http</code>, <code className="text-slate-400">https</code>, <code className="text-slate-400">socks5</code>, <code className="text-slate-400">socks5h</code>. No embedded credentials in proxy URL; use the headers section above for Proxy-Authorization if needed. This is a per-run opt-in; target scope validation and private-network checks still apply.
+                </p>
+              </div>
+            </details>
 
             <textarea
               rows={4}
@@ -1237,6 +1536,26 @@ ${rows || '<p>No results.</p>'}
                 <button type="button" onClick={togglePause} className={`min-h-10 rounded-lg border px-3 py-2 text-xs font-semibold ${isPaused ? 'border-amber-700 bg-amber-950/40 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'}`}>{isPaused ? 'Resume' : 'Pause'}</button>
               </div>
             </div>
+            <details className="rounded-lg border border-slate-800 bg-slate-950/40">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100">
+                Opt-in proxy routing (optional, one-shot scope)
+              </summary>
+              <div className="space-y-2 border-t border-slate-800 p-3">
+                <label className="text-xs text-slate-400">Proxy URL (HTTP/HTTPS/SOCKS5)
+                  <input
+                    type="text"
+                    value={proxyURL}
+                    onChange={(e) => setProxyURL(e.target.value)}
+                    disabled={isReconBusy}
+                    placeholder="http://127.0.0.1:8080  |  socks5://127.0.0.1:1080  |  https://proxy.example:8443"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </label>
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Route Path Fuzzer traffic through a local inspection proxy (e.g., Burp, OWASP ZAP, mitmproxy). Supported schemes: <code className="text-slate-400">http</code>, <code className="text-slate-400">https</code>, <code className="text-slate-400">socks5</code>, <code className="text-slate-400">socks5h</code>. No embedded credentials in proxy URL; use the Web Audit headers section for Proxy-Authorization if needed. This is a per-run opt-in; target scope validation and private-network checks still apply.
+                </p>
+              </div>
+            </details>
             <div className="space-y-1">
               <div className="text-[11px] text-slate-500">Framework presets (HEAD-only, bounded; use within authorized scope):</div>
               <div className="flex flex-wrap gap-2">

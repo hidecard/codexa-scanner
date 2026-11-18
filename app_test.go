@@ -404,7 +404,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10)
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10, nil, "")
 	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
 		t.Fatalf("expected private target policy error, got %+v", results)
 	}
@@ -412,7 +412,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 		t.Fatalf("request reached private target without opt-in (%d requests)", got)
 	}
 
-	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10)
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10, nil, "")
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
@@ -434,7 +434,7 @@ func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testi
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10)
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10, nil, "")
 	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
 		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
 	}
@@ -470,8 +470,12 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 	defer client.CloseIdleConnections()
 	trace := client.Transport.(*redirectTraceTransport)
 	transport := trace.base.(*http.Transport)
+	// The scoped transport should not use ambient proxies; its Proxy func should return nil.
 	if transport.Proxy != nil {
-		t.Fatal("scoped transport must not use ambient proxies")
+		proxyURL, err := transport.Proxy(&http.Request{URL: &url.URL{Scheme: "http", Host: "example.com"}})
+		if err != nil || proxyURL != nil {
+			t.Fatal("scoped transport must not use ambient proxies")
+		}
 	}
 
 	result := analyzeURL(serverURL.String(), client, nil, HTTPRequestProfile{})

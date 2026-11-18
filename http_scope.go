@@ -24,8 +24,38 @@ const (
 )
 
 type HTTPRequestProfile struct {
-	UserAgent      string `json:"userAgent"`
-	TimeoutSeconds int    `json:"timeoutSeconds"`
+	UserAgent      string            `json:"userAgent"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+	CustomHeaders  map[string]string `json:"customHeaders,omitempty"`
+	ProxyURL       string            `json:"proxyUrl,omitempty"`
+}
+
+// sensitiveHeaderNames lists request header names whose values must never be
+// stored or persisted in the clear. Values are redacted at profile-resolution
+// time so downstream code (analyzeURL, history, exports) never sees secrets.
+var sensitiveHeaderNames = map[string]bool{
+	"authorization":    true,
+	"cookie":           true,
+	"cookie2":          true,
+	"x-api-key":        true,
+	"apikey":           true,
+	"x-csrf-token":     true,
+	"csrf-token":       true,
+	"x-xsrf-token":     true,
+	"proxy-authorization": true,
+}
+
+func headerNameLooksValid(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func resolveHTTPRequestProfile(profile HTTPRequestProfile) HTTPRequestProfile {
@@ -56,7 +86,62 @@ func resolveHTTPRequestProfile(profile HTTPRequestProfile) HTTPRequestProfile {
 			t = 60
 		}
 	}
-	return HTTPRequestProfile{UserAgent: ua, TimeoutSeconds: t}
+	headers := make(map[string]string, len(profile.CustomHeaders))
+	for name, value := range profile.CustomHeaders {
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if !headerNameLooksValid(lower) {
+			continue
+		}
+		// Reject hop-by-hop / unsafe headers that the transport controls itself.
+		switch lower {
+		case "host", "content-length", "transfer-encoding", "connection",
+			"keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+			"trailer", "upgrade":
+			continue
+		}
+		v := strings.Map(func(r rune) rune {
+			if r == '\r' || r == '\n' {
+				return -1
+			}
+			return r
+		}, value)
+		if len(v) > 512 {
+			v = v[:512]
+		}
+		if sensitiveHeaderNames[lower] {
+			headers[lower] = redactHeaderPreview(v)
+		} else {
+			headers[lower] = v
+		}
+	}
+	// Resolve and validate proxy URL (opt-in only; must be explicit non-empty string)
+	proxyURL := strings.TrimSpace(profile.ProxyURL)
+	if proxyURL != "" {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			proxyURL = "" // invalid proxy URL -> ignore (treat as no proxy)
+		} else {
+			scheme := strings.ToLower(parsed.Scheme)
+			if scheme != "http" && scheme != "https" && scheme != "socks5" && scheme != "socks5h" {
+				proxyURL = "" // unsupported scheme -> ignore
+			}
+			// Disallow embedded credentials in proxy URL; use header if needed.
+			if parsed.User != nil {
+				proxyURL = ""
+			}
+		}
+	}
+	return HTTPRequestProfile{UserAgent: ua, TimeoutSeconds: t, CustomHeaders: headers, ProxyURL: proxyURL}
+}
+
+// redactHeaderPreview shows a short prefix/suffix with the middle masked so
+// authenticated session context remains visible enough to confirm a header was
+// sent while never persisting a usable credential.
+func redactHeaderPreview(value string) string {
+	if len(value) <= 8 {
+		return "[REDACTED]"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
 }
 
 type redirectTraceTransport struct {
@@ -367,7 +452,14 @@ func newScopedHTTPClientWithProfile(target string, allowPrivate bool, lookup htt
 	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
 		// An ambient proxy could resolve the hostname elsewhere and bypass our pins.
-		Proxy: nil,
+		// Only use explicitly configured proxy from profile (opt-in).
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			if prof.ProxyURL == "" {
+				return nil, nil
+			}
+			// Return the pre-validated proxy URL for all requests through this transport.
+			return url.Parse(prof.ProxyURL)
+		},
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			requestHost, requestPort, err := net.SplitHostPort(address)
 			if err != nil {

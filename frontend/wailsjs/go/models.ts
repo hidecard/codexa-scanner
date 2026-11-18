@@ -1,5 +1,107 @@
 export namespace main {
 	
+	export class AdvisoryCVE {
+	    cve: string;
+	    title: string;
+	    affectedVersions: string;
+	    fixedVersion: string;
+	    severity: string;
+	    description: string;
+	    references: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AdvisoryCVE(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cve = source["cve"];
+	        this.title = source["title"];
+	        this.affectedVersions = source["affectedVersions"];
+	        this.fixedVersion = source["fixedVersion"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.references = source["references"];
+	    }
+	}
+	export class AdvisoryMatch {
+	    product: string;
+	    detectedVersion?: string;
+	    matches: AdvisoryCVE[];
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AdvisoryMatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.product = source["product"];
+	        this.detectedVersion = source["detectedVersion"];
+	        this.matches = this.convertValues(source["matches"], AdvisoryCVE);
+	        this.source = source["source"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Alignment {
+	    spf?: string;
+	    dkim?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Alignment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spf = source["spf"];
+	        this.dkim = source["dkim"];
+	    }
+	}
+	export class BilingualText {
+	    en: string;
+	    my: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BilingualText(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.en = source["en"];
+	        this.my = source["my"];
+	    }
+	}
+	export class BilingualTextList {
+	    en: string[];
+	    my: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BilingualTextList(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.en = source["en"];
+	        this.my = source["my"];
+	    }
+	}
 	export class SecurityFinding {
 	    id: string;
 	    severity: string;
@@ -204,6 +306,7 @@ export namespace main {
 	    robotsTxt?: WebResourceInspector;
 	    clientSideAudit?: ClientSideAudit;
 	    findings: SecurityFinding[];
+	    advisoryMatches?: AdvisoryMatch[];
 	    error: string;
 	
 	    static createFrom(source: any = {}) {
@@ -231,6 +334,7 @@ export namespace main {
 	        this.robotsTxt = this.convertValues(source["robotsTxt"], WebResourceInspector);
 	        this.clientSideAudit = this.convertValues(source["clientSideAudit"], ClientSideAudit);
 	        this.findings = this.convertValues(source["findings"], SecurityFinding);
+	        this.advisoryMatches = this.convertValues(source["advisoryMatches"], AdvisoryMatch);
 	        this.error = source["error"];
 	    }
 	
@@ -254,6 +358,152 @@ export namespace main {
 	}
 	
 	
+	export class DKIMAnalysis {
+	    recordsFound: number;
+	    selectors?: string[];
+	    keyTypes?: string[];
+	    keySizes?: number[];
+	    warnings?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DKIMAnalysis(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.recordsFound = source["recordsFound"];
+	        this.selectors = source["selectors"];
+	        this.keyTypes = source["keyTypes"];
+	        this.keySizes = source["keySizes"];
+	        this.warnings = source["warnings"];
+	    }
+	}
+	export class DKIMRecord {
+	    selector: string;
+	    record: string;
+	    keyType?: string;
+	    keySize?: number;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DKIMRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.selector = source["selector"];
+	        this.record = source["record"];
+	        this.keyType = source["keyType"];
+	        this.keySize = source["keySize"];
+	        this.note = source["note"];
+	    }
+	}
+	export class DMARCAnalysis {
+	    record: string;
+	    hasDMARC: boolean;
+	    policy?: string;
+	    subdomainPolicy?: string;
+	    percent?: number;
+	    rua?: string[];
+	    ruf?: string[];
+	    alignment?: Alignment;
+	    warnings?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DMARCAnalysis(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.record = source["record"];
+	        this.hasDMARC = source["hasDMARC"];
+	        this.policy = source["policy"];
+	        this.subdomainPolicy = source["subdomainPolicy"];
+	        this.percent = source["percent"];
+	        this.rua = source["rua"];
+	        this.ruf = source["ruf"];
+	        this.alignment = this.convertValues(source["alignment"], Alignment);
+	        this.warnings = source["warnings"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SPFAnalysis {
+	    record: string;
+	    hasSPF: boolean;
+	    allMechanism?: string;
+	    weakMechanisms?: string[];
+	    includes?: string[];
+	    redirects?: string[];
+	    warnings?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SPFAnalysis(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.record = source["record"];
+	        this.hasSPF = source["hasSPF"];
+	        this.allMechanism = source["allMechanism"];
+	        this.weakMechanisms = source["weakMechanisms"];
+	        this.includes = source["includes"];
+	        this.redirects = source["redirects"];
+	        this.warnings = source["warnings"];
+	    }
+	}
+	export class EmailPolicyAnalysis {
+	    spf: SPFAnalysis;
+	    dmarc: DMARCAnalysis;
+	    dkim: DKIMAnalysis;
+	    rating: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmailPolicyAnalysis(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spf = this.convertValues(source["spf"], SPFAnalysis);
+	        this.dmarc = this.convertValues(source["dmarc"], DMARCAnalysis);
+	        this.dkim = this.convertValues(source["dkim"], DKIMAnalysis);
+	        this.rating = source["rating"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class RDAPInfo {
 	    ip: string;
 	    networkHandle?: string;
@@ -283,9 +533,11 @@ export namespace main {
 	    txt: string[];
 	    spf: string[];
 	    dmarc: string[];
+	    dkim?: DKIMRecord[];
 	    ptr: Record<string, Array<string>>;
 	    rdap?: RDAPInfo[];
 	    errors?: string[];
+	    emailPolicy?: EmailPolicyAnalysis;
 	
 	    static createFrom(source: any = {}) {
 	        return new DNSIntelligenceResult(source);
@@ -301,9 +553,11 @@ export namespace main {
 	        this.txt = source["txt"];
 	        this.spf = source["spf"];
 	        this.dmarc = source["dmarc"];
+	        this.dkim = this.convertValues(source["dkim"], DKIMRecord);
 	        this.ptr = source["ptr"];
 	        this.rdap = this.convertValues(source["rdap"], RDAPInfo);
 	        this.errors = source["errors"];
+	        this.emailPolicy = this.convertValues(source["emailPolicy"], EmailPolicyAnalysis);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -324,6 +578,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	export class HistoryEntry {
 	    id: number;
 	    scanType: string;
@@ -511,11 +766,160 @@ export namespace main {
 	}
 	
 	
+	export class StackFix {
+	    file: string;
+	    location: string;
+	    before: string;
+	    after: string;
+	    deploy: string;
+	    verify: string;
+	    rollback: string;
 	
+	    static createFrom(source: any = {}) {
+	        return new StackFix(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.location = source["location"];
+	        this.before = source["before"];
+	        this.after = source["after"];
+	        this.deploy = source["deploy"];
+	        this.verify = source["verify"];
+	        this.rollback = source["rollback"];
+	    }
+	}
+	export class RemediationEntry {
+	    id: string;
+	    title: BilingualText;
+	    mechanism: BilingualText;
+	    rootCause: BilingualText;
+	    impact: BilingualText;
+	    severity: string;
+	    priority: string;
+	    changeRisk: string;
+	    prerequisites: BilingualTextList;
+	    implementationNotes: BilingualTextList;
+	    commonMistakes: BilingualTextList;
+	    attackScenario: BilingualText;
+	    attackSteps: BilingualTextList;
+	    whereToFix: BilingualText;
+	    verificationSteps: BilingualTextList;
+	    falsePositiveNotes: BilingualText;
+	    references: string[];
+	    relatedFindings: string[];
+	    stacks: Record<string, StackFix>;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemediationEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = this.convertValues(source["title"], BilingualText);
+	        this.mechanism = this.convertValues(source["mechanism"], BilingualText);
+	        this.rootCause = this.convertValues(source["rootCause"], BilingualText);
+	        this.impact = this.convertValues(source["impact"], BilingualText);
+	        this.severity = source["severity"];
+	        this.priority = source["priority"];
+	        this.changeRisk = source["changeRisk"];
+	        this.prerequisites = this.convertValues(source["prerequisites"], BilingualTextList);
+	        this.implementationNotes = this.convertValues(source["implementationNotes"], BilingualTextList);
+	        this.commonMistakes = this.convertValues(source["commonMistakes"], BilingualTextList);
+	        this.attackScenario = this.convertValues(source["attackScenario"], BilingualText);
+	        this.attackSteps = this.convertValues(source["attackSteps"], BilingualTextList);
+	        this.whereToFix = this.convertValues(source["whereToFix"], BilingualText);
+	        this.verificationSteps = this.convertValues(source["verificationSteps"], BilingualTextList);
+	        this.falsePositiveNotes = this.convertValues(source["falsePositiveNotes"], BilingualText);
+	        this.references = source["references"];
+	        this.relatedFindings = source["relatedFindings"];
+	        this.stacks = this.convertValues(source["stacks"], StackFix, true);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RemediationKnowledge {
+	    version: string;
+	    stacks: string[];
+	    entries: RemediationEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RemediationKnowledge(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.stacks = source["stacks"];
+	        this.entries = this.convertValues(source["entries"], RemediationEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	export class TakeoverClue {
+	    subdomain: string;
+	    cnameTarget: string;
+	    provider: string;
+	    status: string;
+	    evidence: string;
+	    remediation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TakeoverClue(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subdomain = source["subdomain"];
+	        this.cnameTarget = source["cnameTarget"];
+	        this.provider = source["provider"];
+	        this.status = source["status"];
+	        this.evidence = source["evidence"];
+	        this.remediation = source["remediation"];
+	    }
+	}
 	export class SubdomainResult {
 	    domain: string;
 	    names: string[];
 	    errors?: string[];
+	    takeoverClues?: TakeoverClue[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SubdomainResult(source);
@@ -526,7 +930,26 @@ export namespace main {
 	        this.domain = source["domain"];
 	        this.names = source["names"];
 	        this.errors = source["errors"];
+	        this.takeoverClues = this.convertValues(source["takeoverClues"], TakeoverClue);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	
 	export class TLSInspection {
@@ -593,6 +1016,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	export class WebAuditURLDiff {
 	    url: string;
 	    // Go type: time

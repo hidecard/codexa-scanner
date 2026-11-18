@@ -35,6 +35,427 @@ import (
 	"github.com/go-pdf/fpdf"
 )
 
+// ==========================================
+// 4. PASSIVE VERSION-TO-CVE ADVISORY MATCHER
+// ==========================================
+
+type AdvisoryCVE struct {
+	CVE             string   `json:"cve"`
+	Title           string   `json:"title"`
+	AffectedVersions string  `json:"affectedVersions"`
+	FixedVersion    string   `json:"fixedVersion"`
+	Severity        string   `json:"severity"`
+	Description     string   `json:"description"`
+	References      []string `json:"references"`
+}
+
+type AdvisoryEntry struct {
+	Product string         `json:"product"`
+	CVEs    []AdvisoryCVE  `json:"cves"`
+}
+
+type AdvisoryMatch struct {
+	Product       string        `json:"product"`
+	DetectedVersion string      `json:"detectedVersion,omitempty"`
+	Matches       []AdvisoryCVE `json:"matches"`
+	Source        string        `json:"source"` // "banner", "server-header", "powered-by", "technology", "tls"
+}
+
+var (
+	advisoryData     []AdvisoryEntry
+	advisoryDataOnce sync.Once
+	advisoryLoadErr  error
+)
+
+func loadAdvisoryData() ([]AdvisoryEntry, error) {
+	advisoryDataOnce.Do(func() {
+		data, err := os.ReadFile(filepath.Join("knowledge", "advisory.json"))
+		if err != nil {
+			advisoryLoadErr = fmt.Errorf("failed to read advisory data: %w", err)
+			return
+		}
+		if err := json.Unmarshal(data, &advisoryData); err != nil {
+			advisoryLoadErr = fmt.Errorf("failed to parse advisory data: %w", err)
+			return
+		}
+	})
+	return advisoryData, advisoryLoadErr
+}
+
+func extractVersionFromBanner(banner string) (product, version string) {
+	bannerLower := strings.ToLower(banner)
+
+	// SSH version extraction: SSH-2.0-OpenSSH_9.2p1
+	if strings.HasPrefix(bannerLower, "ssh-") {
+		if idx := strings.Index(bannerLower, "openssh_"); idx != -1 {
+			versionPart := banner[idx+len("OpenSSH_"):]
+			version = strings.TrimSpace(strings.Split(versionPart, " ")[0])
+			return "OpenSSH", version
+		}
+		if idx := strings.Index(bannerLower, "dropbear"); idx != -1 {
+			versionPart := banner[idx+len("Dropbear"):]
+			version = strings.TrimSpace(strings.Split(versionPart, " ")[0])
+			return "Dropbear", version
+		}
+	}
+
+	// HTTP Server header: nginx/1.24.0, Apache/2.4.58, Microsoft-IIS/10.0
+	if strings.Contains(bannerLower, "server:") || strings.Contains(bannerLower, "http/") {
+		serverIdx := strings.Index(bannerLower, "server:")
+		if serverIdx != -1 {
+			serverLine := strings.TrimSpace(banner[serverIdx+len("server:"):])
+			serverLine = strings.Split(serverLine, "\r")[0]
+			serverLine = strings.Split(serverLine, "\n")[0]
+			return parseServerHeader(serverLine)
+		}
+	}
+
+	// FTP banner: 220 ProFTPD 1.3.7 Server
+	if strings.HasPrefix(bannerLower, "220") || strings.HasPrefix(bannerLower, "230") {
+		if strings.Contains(bannerLower, "proftpd") {
+			return "ProFTPD", extractVersionAfter(banner, "ProFTPD")
+		}
+		if strings.Contains(bannerLower, "vsftpd") {
+			return "vsftpd", extractVersionAfter(banner, "vsftpd")
+		}
+		if strings.Contains(bannerLower, "pure-ftpd") {
+			return "Pure-FTPd", extractVersionAfter(banner, "Pure-FTPd")
+		}
+	}
+
+	// SMTP banner: 220 mail.example.com ESMTP Postfix
+	if strings.HasPrefix(bannerLower, "220") && strings.Contains(bannerLower, "postfix") {
+		return "Postfix", extractVersionAfter(banner, "Postfix")
+	}
+	if strings.HasPrefix(bannerLower, "220") && strings.Contains(bannerLower, "exim") {
+		return "Exim", extractVersionAfter(banner, "Exim")
+	}
+
+	// MySQL banner: 5.7.33-0ubuntu0.18.04.1
+	if strings.Contains(bannerLower, "mysql") {
+		return "MySQL", extractVersionAfter(banner, "MySQL")
+	}
+
+	// PostgreSQL banner
+	if strings.Contains(bannerLower, "postgresql") {
+		return "PostgreSQL", extractVersionAfter(banner, "PostgreSQL")
+	}
+
+	// Redis banner
+	if strings.Contains(bannerLower, "redis") {
+		return "Redis", extractVersionAfter(banner, "Redis")
+	}
+
+	// MongoDB banner
+	if strings.Contains(bannerLower, "mongodb") {
+		return "MongoDB", extractVersionAfter(banner, "MongoDB")
+	}
+
+	return "", ""
+}
+
+func parseServerHeader(server string) (product, version string) {
+	server = strings.TrimSpace(server)
+	parts := strings.Split(server, " ")
+	for _, part := range parts {
+		if strings.Contains(part, "/") {
+			pv := strings.Split(part, "/")
+			if len(pv) == 2 {
+				return pv[0], pv[1]
+			}
+		}
+	}
+	// Try to extract product name from known patterns
+	if strings.Contains(strings.ToLower(server), "nginx") {
+		return "nginx", extractVersionAfter(server, "nginx/")
+	}
+	if strings.Contains(strings.ToLower(server), "apache") {
+		return "Apache httpd", extractVersionAfter(server, "Apache/")
+	}
+	if strings.Contains(strings.ToLower(server), "iis") || strings.Contains(strings.ToLower(server), "microsoft") {
+		return "Microsoft-IIS", extractVersionAfter(server, "Microsoft-IIS/")
+	}
+	if strings.Contains(strings.ToLower(server), "openresty") {
+		return "OpenResty", extractVersionAfter(server, "openresty/")
+	}
+	return "", ""
+}
+
+func extractVersionAfter(haystack, needle string) string {
+	idx := strings.Index(strings.ToLower(haystack), strings.ToLower(needle))
+	if idx == -1 {
+		return ""
+	}
+	after := haystack[idx+len(needle):]
+	// Extract version-like pattern (numbers, dots, hyphens, letters)
+	var version strings.Builder
+	for i, r := range after {
+		if (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			version.WriteRune(r)
+		} else if version.Len() > 0 {
+			break
+		} else if i > 0 {
+			break
+		}
+	}
+	v := strings.Trim(version.String(), "._-")
+	return v
+}
+
+func extractVersionFromPoweredBy(poweredBy string) (product, version string) {
+	poweredBy = strings.TrimSpace(poweredBy)
+	if poweredBy == "" {
+		return "", ""
+	}
+	// X-Powered-By: PHP/8.2.0, Express, ASP.NET, Next.js
+	if strings.Contains(strings.ToLower(poweredBy), "php") {
+		return "PHP", extractVersionAfter(poweredBy, "PHP/")
+	}
+	if strings.Contains(strings.ToLower(poweredBy), "express") {
+		return "Express", extractVersionAfter(poweredBy, "Express/")
+	}
+	if strings.Contains(strings.ToLower(poweredBy), "asp.net") {
+		return "ASP.NET", extractVersionAfter(poweredBy, "ASP.NET/")
+	}
+	if strings.Contains(strings.ToLower(poweredBy), "next.js") || strings.Contains(strings.ToLower(poweredBy), "nextjs") {
+		return "Next.js", extractVersionAfter(poweredBy, "Next.js/")
+	}
+	// Generic: Product/Version
+	parts := strings.Split(poweredBy, "/")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
+
+func extractVersionFromTechnology(tech string) (product, version string) {
+	techLower := strings.ToLower(tech)
+	// Technologies from fingerprinting: "WordPress", "Laravel", "Next.js", "PHP", "Express", "ASP.NET"
+	// These don't typically include versions, but we can check for version patterns
+	if strings.Contains(techLower, "wordpress") {
+		return "WordPress", ""
+	}
+	if strings.Contains(techLower, "laravel") {
+		return "Laravel", ""
+	}
+	if strings.Contains(techLower, "next.js") {
+		return "Next.js", ""
+	}
+	if strings.Contains(techLower, "php") {
+		return "PHP", ""
+	}
+	if strings.Contains(techLower, "express") {
+		return "Express", ""
+	}
+	if strings.Contains(techLower, "asp.net") {
+		return "ASP.NET", ""
+	}
+	if strings.Contains(techLower, "django") {
+		return "Django", ""
+	}
+	if strings.Contains(techLower, "rails") {
+		return "Ruby on Rails", ""
+	}
+	return "", ""
+}
+
+func versionLessThan(v1, v2 string) bool {
+	// Simple version comparison for semantic versions
+	// Handles formats like: 1.2.3, 1.2.3-p1, 9.8p1, 7.2.5, etc.
+	v1Parts := parseVersionParts(v1)
+	v2Parts := parseVersionParts(v2)
+
+	maxLen := len(v1Parts)
+	if len(v2Parts) > maxLen {
+		maxLen = len(v2Parts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var p1, p2 int
+		if i < len(v1Parts) {
+			p1 = v1Parts[i]
+		}
+		if i < len(v2Parts) {
+			p2 = v2Parts[i]
+		}
+		if p1 < p2 {
+			return true
+		}
+		if p1 > p2 {
+			return false
+		}
+	}
+	return false
+}
+
+func parseVersionParts(version string) []int {
+	var parts []int
+	for _, part := range strings.Split(version, ".") {
+		// Handle suffixes like "p1", "rc1", "-alpha"
+		numStr := ""
+		for _, r := range part {
+			if r >= '0' && r <= '9' {
+				numStr += string(r)
+			} else {
+				break
+			}
+		}
+		if numStr != "" {
+			if n, err := strconv.Atoi(numStr); err == nil {
+				parts = append(parts, n)
+			}
+		} else {
+			parts = append(parts, 0)
+		}
+	}
+	return parts
+}
+
+func isVersionAffected(detectedVersion, affectedRange, fixedVersion string) bool {
+	if detectedVersion == "" {
+		return false
+	}
+	// affectedRange format: "< 9.8p1" or "< 3.0.16, < 3.1.6"
+	// fixedVersion format: "9.8p1" or "3.0.16 / 3.1.6"
+	
+	// Check against fixed versions (more reliable)
+	fixedVersions := strings.Split(fixedVersion, "/")
+	for _, fv := range fixedVersions {
+		fv = strings.TrimSpace(fv)
+		if fv != "" && versionLessThan(detectedVersion, fv) {
+			return true
+		}
+	}
+	
+	// Also check affected range
+	ranges := strings.Split(affectedRange, ",")
+	for _, r := range ranges {
+		r = strings.TrimSpace(r)
+		if strings.HasPrefix(r, "<") {
+			threshold := strings.TrimSpace(r[1:])
+			if threshold != "" && versionLessThan(detectedVersion, threshold) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchAdvisoriesForProduct(product, version string) []AdvisoryCVE {
+	advisories, err := loadAdvisoryData()
+	if err != nil {
+		return nil
+	}
+	var matches []AdvisoryCVE
+	for _, entry := range advisories {
+		if strings.EqualFold(entry.Product, product) {
+			for _, cve := range entry.CVEs {
+				if isVersionAffected(version, cve.AffectedVersions, cve.FixedVersion) {
+					matches = append(matches, cve)
+				}
+			}
+		}
+	}
+	return matches
+}
+
+func collectAdvisoryMatches(banner, serverHeader, poweredBy string, technologies []string, tlsVersion, cipherSuite string) []AdvisoryMatch {
+	var matches []AdvisoryMatch
+	seen := make(map[string]bool) // product:version:source to dedupe
+
+	// From banner
+	if product, version := extractVersionFromBanner(banner); product != "" && version != "" {
+		key := product + ":" + version + ":banner"
+		if !seen[key] {
+			advisoryMatches := matchAdvisoriesForProduct(product, version)
+			if len(advisoryMatches) > 0 {
+				matches = append(matches, AdvisoryMatch{
+					Product:         product,
+					DetectedVersion: version,
+					Matches:         advisoryMatches,
+					Source:          "banner",
+				})
+				seen[key] = true
+			}
+		}
+	}
+
+	// From Server header
+	if product, version := parseServerHeader(serverHeader); product != "" && version != "" {
+		key := product + ":" + version + ":server-header"
+		if !seen[key] {
+			advisoryMatches := matchAdvisoriesForProduct(product, version)
+			if len(advisoryMatches) > 0 {
+				matches = append(matches, AdvisoryMatch{
+					Product:         product,
+					DetectedVersion: version,
+					Matches:         advisoryMatches,
+					Source:          "server-header",
+				})
+				seen[key] = true
+			}
+		}
+	}
+
+	// From X-Powered-By
+	if product, version := extractVersionFromPoweredBy(poweredBy); product != "" && version != "" {
+		key := product + ":" + version + ":powered-by"
+		if !seen[key] {
+			advisoryMatches := matchAdvisoriesForProduct(product, version)
+			if len(advisoryMatches) > 0 {
+				matches = append(matches, AdvisoryMatch{
+					Product:         product,
+					DetectedVersion: version,
+					Matches:         advisoryMatches,
+					Source:          "powered-by",
+				})
+				seen[key] = true
+			}
+		}
+	}
+
+	// From technologies (no version, just product name matching for critical advisories)
+	for _, tech := range technologies {
+		if product, _ := extractVersionFromTechnology(tech); product != "" {
+			key := product + "::technology"
+			if !seen[key] {
+				advisoryMatches := matchAdvisoriesForProduct(product, "")
+				if len(advisoryMatches) > 0 {
+					matches = append(matches, AdvisoryMatch{
+						Product:         product,
+						DetectedVersion: "",
+						Matches:         advisoryMatches,
+						Source:          "technology",
+					})
+					seen[key] = true
+				}
+			}
+		}
+	}
+
+	// TLS/SSL version checks
+	if tlsVersion != "" {
+		if strings.Contains(strings.ToLower(tlsVersion), "ssl") || strings.Contains(strings.ToLower(tlsVersion), "tls 1.0") || strings.Contains(strings.ToLower(tlsVersion), "tls 1.1") {
+			// Match against OpenSSL advisories for weak protocols
+			key := "OpenSSL::tls"
+			if !seen[key] {
+				advisoryMatches := matchAdvisoriesForProduct("OpenSSL", "")
+				if len(advisoryMatches) > 0 {
+					matches = append(matches, AdvisoryMatch{
+						Product:         "OpenSSL",
+						DetectedVersion: tlsVersion,
+						Matches:         advisoryMatches,
+						Source:          "tls",
+					})
+					seen[key] = true
+				}
+			}
+		}
+	}
+
+	return matches
+}
+
 type App struct {
 	ctx        context.Context
 	scanMu     sync.Mutex
@@ -448,6 +869,282 @@ func (a *App) StopPortScan() {
 	}
 }
 
+// CIDRSweepResult contains results for a /24 CIDR port sweep.
+type CIDRSweepResult struct {
+	CIDR      string               `json:"cidr"`
+	Hosts     []CIDRHostResult     `json:"hosts"`
+	Error     string               `json:"error,omitempty"`
+	Scanned   int                  `json:"scanned"`
+	LiveHosts int                  `json:"liveHosts"`
+}
+
+// CIDRHostResult contains port scan results for a single host in a CIDR sweep.
+type CIDRHostResult struct {
+	IP              string           `json:"ip"`
+	Hostname        string           `json:"hostname,omitempty"`
+	Ports           []PortFinding    `json:"ports,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	AdvisoryMatches []AdvisoryMatch  `json:"advisoryMatches,omitempty"`
+}
+
+// internal type for collecting sweep results
+type cidrHostResult struct {
+	ip              string
+	hostname        string
+	ports           []PortFinding
+	err             string
+	advisoryMatches []AdvisoryMatch
+}
+
+// StartCIDRSweep starts a bounded /24 CIDR port sweep with explicit scope confirmation.
+func (a *App) StartCIDRSweep(cidr string, startPort, endPort, workers, timeoutMs int, scopeConfirmed bool) string {
+	if a == nil {
+		return "Scanner unavailable"
+	}
+	// Validate CIDR is IPv4 /24
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "Invalid CIDR notation (e.g., 192.168.1.0/24)"
+	}
+	ones, bits := ipNet.Mask.Size()
+	if bits != 32 || ones != 24 {
+		return "Only IPv4 /24 CIDR ranges are supported for sweep"
+	}
+	// Ensure it's a network address (host bits zero)
+	if !ipNet.IP.Equal(ipNet.IP.Mask(ipNet.Mask)) {
+		return "CIDR must be a network address (host bits zero), e.g., 192.168.1.0/24"
+	}
+	// Validate ports
+	if startPort < 1 || endPort > 65535 || startPort > endPort {
+		return "Invalid port range (1-65535)"
+	}
+	if !scopeConfirmed {
+		return "Confirm authorization for this CIDR range and port range before sweeping"
+	}
+	workers, timeout := normalizePortScanLimits(endPort-startPort+1, workers, timeoutMs)
+
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	a.scanMu.Lock()
+	if a.activeScan != nil {
+		a.scanMu.Unlock()
+		cancel()
+		return "A scan is already running or stopping"
+	}
+	a.nextScanID++
+	scan := &portScan{id: a.nextScanID, ctx: ctx, cancel: cancel, done: make(chan struct{}), status: scanStatusRunning}
+	a.activeScan = scan
+	a.scanMu.Unlock()
+
+	a.emitScanEvent("scan:status", string(scanStatusRunning))
+	go a.runCIDRSweep(scan, cidr, startPort, endPort, workers, timeout)
+	return "STARTED"
+}
+
+func (a *App) runCIDRSweep(scan *portScan, cidr string, startPort, endPort, workers int, timeout time.Duration) {
+	_, ipNet, _ := net.ParseCIDR(cidr)
+	// Generate all IPs in the /24
+	baseIP := ipNet.IP.To4()
+	if baseIP == nil {
+		a.emitScanEvent("scan:error", "Invalid IPv4 CIDR")
+		a.finishCIDRSweep(scan, cidr, scanStatusFailed, nil)
+		return
+	}
+
+	totalIPs := 256
+	portsPerHost := endPort - startPort + 1
+	totalPortChecks := int64(totalIPs * portsPerHost)
+	var scannedCount int64
+	var liveHosts int64
+
+	// Result collection
+	results := make([]cidrHostResult, 0, totalIPs)
+	var resultsMu sync.Mutex
+
+	dialer := &net.Dialer{Timeout: timeout}
+
+	// Host-level worker pool
+	hostChan := make(chan uint8, workers)
+	var wg sync.WaitGroup
+
+	status := scanStatusCompleted
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			status = scanStatusFailed
+			log.Printf("Codexa Scanner: CIDR sweep %d failed: %v", scan.id, recovered)
+		}
+		if scan.ctx.Err() != nil && status != scanStatusFailed {
+			status = scanStatusCancelled
+		}
+		a.finishCIDRSweep(scan, cidr, status, results)
+	}()
+
+	a.emitScanEvent("scan:target", cidr)
+
+	// Start host workers
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for hostOffset := range hostChan {
+				if scan.ctx.Err() != nil {
+					return
+				}
+				// Check pause
+				a.waitIfPaused(scan.ctx)
+
+				ip := make(net.IP, 4)
+				copy(ip, baseIP)
+				ip[3] = hostOffset
+				ipStr := ip.String()
+
+				// Quick host alive check on first port
+				firstPortAddr := net.JoinHostPort(ipStr, strconv.Itoa(startPort))
+				conn, err := dialer.DialContext(scan.ctx, "tcp", firstPortAddr)
+				hostAlive := err == nil
+				if conn != nil {
+					conn.Close()
+				}
+
+				if !hostAlive {
+					// Still count as scanned for progress
+					curr := atomic.AddInt64(&scannedCount, int64(portsPerHost))
+					if scan.ctx.Err() == nil {
+						pct := int((float64(curr) / float64(totalPortChecks)) * 100)
+						a.emitScanEvent("scan:progress", pct)
+					}
+					continue
+				}
+
+				atomic.AddInt64(&liveHosts, 1)
+
+				// Try reverse DNS lookup (best effort)
+				hostname := ""
+				ctxResolve, cancelResolve := context.WithTimeout(scan.ctx, 2*time.Second)
+				if names, err := net.DefaultResolver.LookupAddr(ctxResolve, ipStr); err == nil && len(names) > 0 {
+					hostname = strings.TrimSuffix(names[0], ".")
+				}
+				cancelResolve()
+
+				// Scan ports on this live host
+				var hostPorts []PortFinding
+				for port := startPort; port <= endPort; port++ {
+					if scan.ctx.Err() != nil {
+						break
+					}
+					a.waitIfPaused(scan.ctx)
+
+					address := net.JoinHostPort(ipStr, strconv.Itoa(port))
+					conn, err := dialer.DialContext(scan.ctx, "tcp", address)
+					if err == nil {
+						banner := grabBanner(scan.ctx, conn, ipStr, port)
+						svc := commonPorts[port]
+						if svc == "" {
+							svc = "unknown"
+						}
+						finding := PortFinding{Port: port, Service: svc, Banner: banner}
+						hostPorts = append(hostPorts, finding)
+						a.emitScanEvent("port:found", finding)
+						conn.Close()
+					}
+
+					curr := atomic.AddInt64(&scannedCount, 1)
+					if scan.ctx.Err() == nil && (curr%25 == 0 || curr == totalPortChecks) {
+						pct := int((float64(curr) / float64(totalPortChecks)) * 100)
+						a.emitScanEvent("scan:progress", pct)
+					}
+				}
+
+resultsMu.Lock()
+			// Collect advisory matches from banners
+			var advisoryMatches []AdvisoryMatch
+			for _, pf := range hostPorts {
+				if pf.Banner != "" {
+					matches := collectAdvisoryMatches(pf.Banner, "", "", nil, "", "")
+					advisoryMatches = append(advisoryMatches, matches...)
+				}
+			}
+			// Deduplicate advisory matches
+			seenAdv := make(map[string]bool)
+			var uniqueAdv []AdvisoryMatch
+			for _, am := range advisoryMatches {
+				key := am.Product + ":" + am.DetectedVersion + ":" + am.Source
+				if !seenAdv[key] {
+					seenAdv[key] = true
+					uniqueAdv = append(uniqueAdv, am)
+				}
+			}
+			results = append(results, cidrHostResult{ip: ipStr, hostname: hostname, ports: hostPorts, advisoryMatches: uniqueAdv})
+			resultsMu.Unlock()
+			}
+		}()
+	}
+
+	// Feed host offsets to workers
+	for offset := 0; offset < 256; offset++ {
+		select {
+		case <-scan.ctx.Done():
+			break
+		case hostChan <- uint8(offset):
+		}
+	}
+	close(hostChan)
+	wg.Wait()
+
+	// Sort results by IP
+	sort.Slice(results, func(i, j int) bool {
+		ip1 := net.ParseIP(results[i].ip).To4()
+		ip2 := net.ParseIP(results[j].ip).To4()
+		return bytes.Compare(ip1, ip2) < 0
+	})
+}
+
+func (a *App) finishCIDRSweep(scan *portScan, cidr string, status scanStatus, results []cidrHostResult) {
+	var sweepResult CIDRSweepResult
+	if results != nil {
+		sweepResult = CIDRSweepResult{
+			CIDR:  cidr,
+			Hosts: make([]CIDRHostResult, 0, len(results)),
+		}
+		for _, r := range results {
+			sweepResult.Hosts = append(sweepResult.Hosts, CIDRHostResult{
+				IP:              r.ip,
+				Hostname:        r.hostname,
+				Ports:           r.ports,
+				Error:           r.err,
+				AdvisoryMatches: r.advisoryMatches,
+			})
+		}
+		sweepResult.Scanned = len(results)
+		for _, h := range sweepResult.Hosts {
+			if len(h.Ports) > 0 {
+				sweepResult.LiveHosts++
+			}
+		}
+	}
+
+	if status == scanStatusCompleted {
+		if err := a.saveHistory("cidr-sweep", cidr, sweepResult); err != nil {
+			log.Printf("Codexa Scanner: saving CIDR sweep history: %v", err)
+		}
+	}
+
+	scan.status = status
+	scan.cancel()
+	a.emitScanEvent("scan:status", string(status))
+	a.emitScanEvent("scan:done", string(status))
+	a.emitScanEvent("cidr:sweep-done", sweepResult)
+	a.scanMu.Lock()
+	if a.activeScan == scan {
+		a.activeScan = nil
+	}
+	a.scanMu.Unlock()
+	close(scan.done)
+}
+
 // ==========================================
 // 2. BULK HTTP SECURITY & TECH ANALYZER
 // ==========================================
@@ -472,6 +1169,7 @@ type BulkHeaderResult struct {
 	RobotsTxt       *WebResourceInspector `json:"robotsTxt,omitempty"`
 	ClientSideAudit *ClientSideAudit      `json:"clientSideAudit,omitempty"`
 	Findings        []SecurityFinding     `json:"findings"`
+	AdvisoryMatches []AdvisoryMatch       `json:"advisoryMatches,omitempty"`
 	Error           string                `json:"error"`
 }
 
@@ -627,7 +1325,7 @@ func (a *App) waitForRateSlot(ctx context.Context, last time.Time, rc ScanRateCo
 	return time.Now(), true
 }
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int) []BulkHeaderResult {
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, customHeaders map[string]string, proxyURL string) []BulkHeaderResult {
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -653,7 +1351,7 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	if requestDelayMs < 0 { requestDelayMs = 0 }
 	if requestDelayMs > 5000 { requestDelayMs = 5000 }
 	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
-	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds})
+	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds, CustomHeaders: customHeaders, ProxyURL: proxyURL})
 
 	secHeaders := []string{
 		"Strict-Transport-Security",
@@ -743,6 +1441,9 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 	ua := profile.resolvedUserAgent()
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Origin", "https://probe.codexa.invalid")
+	for name, value := range profile.CustomHeaders {
+		req.Header.Set(name, value)
+	}
 	resp, err := client.Do(req)
 	result.Redirects = snapshotRedirectHops(client)
 	if err != nil {
@@ -837,6 +1538,15 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 	if len(csFindings) > 0 {
 		result.Findings = append(result.Findings, csFindings...)
 	}
+
+	// Collect advisory matches
+	tlsVersion := ""
+	cipherSuite := ""
+	if result.TLS != nil {
+		tlsVersion = result.TLS.Version
+		cipherSuite = result.TLS.CipherSuite
+	}
+	result.AdvisoryMatches = collectAdvisoryMatches("", result.Server, result.PoweredBy, result.Technologies, tlsVersion, cipherSuite)
 
 	result.RiskScore, result.Grade = gradeFindings(result.Findings)
 	return result

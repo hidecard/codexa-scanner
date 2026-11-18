@@ -1,0 +1,294 @@
+{
+  "version": "2026.11",
+  "description": "Bundled offline advisory dataset for passive version-to-CVE matching. Only includes well-known, high-impact vulnerabilities with clear version boundaries. Used for passive hints only; not a substitute for a full vulnerability scanner.",
+  "entries": [
+    {
+      "product": "OpenSSH",
+      "cves": [
+        {
+          "cve": "CVE-2024-6387",
+          "title": "RegreSSHion: Signal handler race condition in OpenSSH",
+          "affectedVersions": "< 9.8p1",
+          "fixedVersion": "9.8p1",
+          "severity": "critical",
+          "description": "A signal handler race condition in OpenSSH's privileged child process can lead to remote unauthenticated code execution as root on glibc-based Linux systems.",
+          "references": ["https://www.openwall.com/lists/oss-security/2024/07/01/4", "https://www.qualys.com/2024/07/01/cve-2024-6387/regresshion.txt"]
+        },
+        {
+          "cve": "CVE-2023-38408",
+          "title": "OpenSSH forwarded ssh-agent double-free",
+          "affectedVersions": "< 9.3p2",
+          "fixedVersion": "9.3p2",
+          "severity": "high",
+          "description": "A double-free vulnerability in the ssh-agent forwarding feature could allow remote code execution.",
+          "references": ["https://www.openwall.com/lists/oss-security/2023/07/19/1"]
+        }
+      ]
+    },
+    {
+      "product": "nginx",
+      "cves": [
+        {
+          "cve": "CVE-2024-32760",
+          "title": "nginx HTTP/3 QUIC stack memory corruption",
+          "affectedVersions": "< 1.26.0, < 1.25.2",
+          "fixedVersion": "1.26.0 / 1.25.2",
+          "severity": "high",
+          "description": "Memory corruption in the HTTP/3 QUIC implementation could lead to worker process crashes or potential code execution.",
+          "references": ["https://nginx.org/en/security_advisories.html"]
+        },
+        {
+          "cve": "CVE-2023-44487",
+          "title": "HTTP/2 Rapid Reset (nginx)",
+          "affectedVersions": "< 1.25.2, < 1.24.1",
+          "fixedVersion": "1.25.2 / 1.24.1",
+          "severity": "high",
+          "description": "HTTP/2 stream cancellation attack allowing DoS via rapid stream resets.",
+          "references": ["https://nginx.org/en/security_advisories.html"]
+        }
+      ]
+    },
+    {
+      "product": "Apache httpd",
+      "cves": [
+        {
+          "cve": "CVE-2024-36387",
+          "title": "Apache HTTP Server mod_proxy SSRF",
+          "affectedVersions": "< 2.4.60",
+          "fixedVersion": "2.4.60",
+          "severity": "high",
+          "description": "Server-side request forgery in mod_proxy when handling certain URI patterns.",
+          "references": ["https://httpd.apache.org/security/vulnerabilities_24.html"]
+        },
+        {
+          "cve": "CVE-2023-38709",
+          "title": "Apache HTTP Server HTTP/2 DoS",
+          "affectedVersions": "< 2.4.58",
+          "fixedVersion": "2.4.58",
+          "severity": "high",
+          "description": "HTTP/2 rapid reset DoS vulnerability.",
+          "references": ["https://httpd.apache.org/security/vulnerabilities_24.html"]
+        }
+      ]
+    },
+    {
+      "product": "Microsoft-IIS",
+      "cves": [
+        {
+          "cve": "CVE-2024-21413",
+          "title": "IIS OLE Remote Code Execution",
+          "affectedVersions": "< 10.0.19045.4353",
+          "fixedVersion": "10.0.19045.4353 (March 2024 Update)",
+          "severity": "critical",
+          "description": "Remote code execution via malicious OLE object in web content.",
+          "references": ["https://msrc.microsoft.com/update-guide/vulnerability/CVE-2024-21413"]
+        }
+      ]
+    },
+    {
+      "product": "OpenSSL",
+      "cves": [
+        {
+          "cve": "CVE-2024-4741",
+          "title": "OpenSSL TLS session ticket DoS",
+          "affectedVersions": "< 3.0.16, < 3.1.6, < 3.2.2, < 3.3.1",
+          "fixedVersion": "3.0.16 / 3.1.6 / 3.2.2 / 3.3.1",
+          "severity": "high",
+          "description": "Memory exhaustion via crafted TLS session tickets.",
+          "references": ["https://www.openssl.org/news/secadv/20240827.txt"]
+        },
+        {
+          "cve": "CVE-2023-5678",
+          "title": "OpenSSL X.509 certificate parsing DoS",
+          "affectedVersions": "< 3.0.12, < 3.1.4, < 3.2.0",
+          "fixedVersion": "3.0.12 / 3.1.4 / 3.2.0",
+          "severity": "medium",
+          "description": "Excessive resource consumption when parsing malicious certificate chains.",
+          "references": ["https://www.openssl.org/news/secadv/20240226.txt"]
+        }
+      ]
+    },
+    {
+      "product": "MySQL",
+      "cves": [
+        {
+          "cve": "CVE-2024-21011",
+          "title": "MySQL Server DoS via crafted packets",
+          "affectedVersions": "< 8.0.36",
+          "fixedVersion": "8.0.36",
+          "severity": "medium",
+          "description": "Unauthenticated DoS via malformed protocol packets.",
+          "references": ["https://www.oracle.com/security-alerts/cpuapr2024.html"]
+        }
+      ]
+    },
+    {
+      "product": "PostgreSQL",
+      "cves": [
+        {
+          "cve": "CVE-2024-4317",
+          "title": "PostgreSQL privilege escalation via pg_dump",
+          "affectedVersions": "< 16.4, < 15.8, < 14.13, < 13.16, < 12.20",
+          "fixedVersion": "16.4 / 15.8 / 14.13 / 13.16 / 12.20",
+          "severity": "high",
+          "description": "Improper privilege handling in pg_dump allows object creation with elevated privileges.",
+          "references": ["https://www.postgresql.org/about/news/2541/"]
+        }
+      ]
+    },
+    {
+      "product": "Redis",
+      "cves": [
+        {
+          "cve": "CVE-2024-31449",
+          "title": "Redis Lua sandbox escape",
+          "affectedVersions": "< 7.2.5, < 7.0.14, < 6.2.16",
+          "fixedVersion": "7.2.5 / 7.0.14 / 6.2.16",
+          "severity": "critical",
+          "description": "Lua sandbox escape allowing arbitrary code execution as the Redis user.",
+          "references": ["https://redis.io/blog/redis-security-release-july-2024/"]
+        }
+      ]
+    },
+    {
+      "product": "MongoDB",
+      "cves": [
+        {
+          "cve": "CVE-2024-6386",
+          "title": "MongoDB authentication bypass",
+          "affectedVersions": "< 7.0.14, < 6.0.21, < 5.0.30, < 4.4.29",
+          "fixedVersion": "7.0.14 / 6.0.21 / 5.0.30 / 4.4.29",
+          "severity": "critical",
+          "description": "Authentication bypass under specific configuration conditions.",
+          "references": ["https://www.mongodb.com/community/forums/t/security-advisory/287967"]
+        }
+      ]
+    },
+    {
+      "product": "vsftpd",
+      "cves": [
+        {
+          "cve": "CVE-2023-4569",
+          "title": "vsftpd denial of service via malformed commands",
+          "affectedVersions": "< 3.0.6",
+          "fixedVersion": "3.0.6",
+          "severity": "medium",
+          "description": "DoS via crafted FTP command sequences causing worker hang.",
+          "references": ["https://security.appspot.com/vsftpd.html"]
+        }
+      ]
+    },
+    {
+      "product": "ProFTPD",
+      "cves": [
+        {
+          "cve": "CVE-2024-3596",
+          "title": "ProFTPD mod_copy arbitrary file read",
+          "affectedVersions": "< 1.3.8c",
+          "fixedVersion": "1.3.8c",
+          "severity": "high",
+          "description": "Directory traversal in mod_copy module allowing arbitrary file read.",
+          "references": ["http://www.proftpd.org/cve-2024-3596.html"]
+        }
+      ]
+    },
+    {
+      "product": "PHP",
+      "cves": [
+        {
+          "cve": "CVE-2024-4577",
+          "title": "PHP CGI argument injection",
+          "affectedVersions": "< 8.3.8, < 8.2.20, < 8.1.29",
+          "fixedVersion": "8.3.8 / 8.2.20 / 8.1.29",
+          "severity": "critical",
+          "description": "Argument injection in PHP CGI mode on Windows allowing remote code execution.",
+          "references": ["https://www.php.net/ChangeLog-8.php"]
+        }
+      ]
+    },
+    {
+      "product": "WordPress",
+      "cves": [
+        {
+          "cve": "CVE-2024-41647",
+          "title": "WordPress core RCE via image processing",
+          "affectedVersions": "< 6.5.5",
+          "fixedVersion": "6.5.5",
+          "severity": "critical",
+          "description": "Remote code execution via malicious image upload in specific server configurations.",
+          "references": ["https://wordpress.org/news/2024/08/wordpress-6-5-5-security-release/"]
+        }
+      ]
+    },
+    {
+      "product": "Drupal",
+      "cves": [
+        {
+          "cve": "CVE-2024-43898",
+          "title": "Drupal core RCE via PHP unserialization",
+          "affectedVersions": "< 11.0.5, < 10.2.5",
+          "fixedVersion": "11.0.5 / 10.2.5",
+          "severity": "critical",
+          "description": "Remote code execution via crafted serialized data in specific endpoints.",
+          "references": ["https://www.drupal.org/sa-core-2024-005"]
+        }
+      ]
+    },
+    {
+      "product": "GitLab",
+      "cves": [
+        {
+          "cve": "CVE-2024-45409",
+          "title": "GitLab CI/CD pipeline RCE",
+          "affectedVersions": "< 17.0.5, < 16.11.6, < 16.10.7",
+          "fixedVersion": "17.0.5 / 16.11.6 / 16.10.7",
+          "severity": "critical",
+          "description": "Pipeline configuration manipulation allowing arbitrary code execution in CI runners.",
+          "references": ["https://about.gitlab.com/releases/2024/08/29/critical-security-release-gitlab-17-0-5-released/"]
+        }
+      ]
+    },
+    {
+      "product": "Atlassian Confluence",
+      "cves": [
+        {
+          "cve": "CVE-2023-22527",
+          "title": "Confluence Data Center/Server template injection RCE",
+          "affectedVersions": "< 8.5.4, < 8.4.5, < 8.3.4, < 8.2.5",
+          "fixedVersion": "8.5.4 / 8.4.5 / 8.3.4 / 8.2.5",
+          "severity": "critical",
+          "description": "Remote code execution via OGNL template injection in Confluence Data Center and Server.",
+          "references": ["https://confluence.atlassian.com/doc/confluence-security-advisory-2023-12-05-1236562575.html"]
+        }
+      ]
+    },
+    {
+      "product": "FortiGate",
+      "cves": [
+        {
+          "cve": "CVE-2024-21762",
+          "title": "FortiOS SSL-VPN out-of-bounds write",
+          "affectedVersions": "< 7.4.3, < 7.2.7, < 7.0.13",
+          "fixedVersion": "7.4.3 / 7.2.7 / 7.0.13",
+          "severity": "critical",
+          "description": "Out-of-bounds write in SSL-VPN daemon allowing unauthenticated RCE.",
+          "references": ["https://www.fortiguard.com/psirt/FG-IR-24-015"]
+        }
+      ]
+    },
+    {
+      "product": "Citrix ADC",
+      "cves": [
+        {
+          "cve": "CVE-2023-3519",
+          "title": "Citrix ADC NetScaler RCE",
+          "affectedVersions": "< 13.1-49.13, < 13.0-91.13, < 12.1-65.25",
+          "fixedVersion": "13.1-49.13 / 13.0-91.13 / 12.1-65.25",
+          "severity": "critical",
+          "description": "Unauthenticated remote code execution in Citrix ADC and NetScaler Gateway.",
+          "references": ["https://support.citrix.com/article/CTX561482"]
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +23,19 @@ const discoveryWorkers = 20
 
 // SubdomainResult contains names found passively and, when requested, by DNS wordlist probing.
 type SubdomainResult struct {
-	Domain string   `json:"domain"`
-	Names  []string `json:"names"`
-	Errors []string `json:"errors,omitempty"`
+	Domain         string               `json:"domain"`
+	Names          []string             `json:"names"`
+	Errors         []string             `json:"errors,omitempty"`
+	TakeoverClues  []TakeoverClue       `json:"takeoverClues,omitempty"`
+}
+
+type TakeoverClue struct {
+	Subdomain     string `json:"subdomain"`
+	CNAMETarget   string `json:"cnameTarget"`
+	Provider      string `json:"provider"`
+	Status        string `json:"status"` // "unresolved", "unclaimed", "potential"
+	Evidence      string `json:"evidence"`
+	Remediation   string `json:"remediation"`
 }
 
 // PathFinding intentionally contains no response body or body-derived data.
@@ -67,17 +79,69 @@ type TLSInspection struct {
 	TLS11Error      string         `json:"tls11Error,omitempty"`
 }
 type DNSIntelligenceResult struct {
-	Domain string              `json:"domain"`
-	A      []string            `json:"a"`
-	AAAA   []string            `json:"aaaa"`
-	MX     []string            `json:"mx"`
-	NS     []string            `json:"ns"`
-	TXT    []string            `json:"txt"`
-	SPF    []string            `json:"spf"`
-	DMARC  []string            `json:"dmarc"`
-	PTR    map[string][]string `json:"ptr"`
-	RDAP   []RDAPInfo          `json:"rdap,omitempty"`
-	Errors []string            `json:"errors,omitempty"`
+	Domain         string              `json:"domain"`
+	A              []string            `json:"a"`
+	AAAA           []string            `json:"aaaa"`
+	MX             []string            `json:"mx"`
+	NS             []string            `json:"ns"`
+	TXT            []string            `json:"txt"`
+	SPF            []string            `json:"spf"`
+	DMARC          []string            `json:"dmarc"`
+	DKIM           []DKIMRecord        `json:"dkim,omitempty"`
+	PTR            map[string][]string `json:"ptr"`
+	RDAP           []RDAPInfo          `json:"rdap,omitempty"`
+	Errors         []string            `json:"errors,omitempty"`
+	EmailPolicy    *EmailPolicyAnalysis `json:"emailPolicy,omitempty"`
+}
+
+type DKIMRecord struct {
+	Selector string `json:"selector"`
+	Record   string `json:"record"`
+	KeyType  string `json:"keyType,omitempty"`
+	KeySize  int    `json:"keySize,omitempty"`
+	Note     string `json:"note,omitempty"`
+}
+
+type EmailPolicyAnalysis struct {
+	SPF    SPFAnalysis    `json:"spf"`
+	DMARC  DMARCAnalysis  `json:"dmarc"`
+	DKIM   DKIMAnalysis   `json:"dkim"`
+	Rating string         `json:"rating"` // "strong", "moderate", "weak", "missing"
+}
+
+type SPFAnalysis struct {
+	Record         string   `json:"record"`
+	HasSPF         bool     `json:"hasSPF"`
+	AllMechanism   string   `json:"allMechanism,omitempty"`  // "+all", "~all", "-all", "?all"
+	WeakMechanisms []string `json:"weakMechanisms,omitempty"`
+	Includes       []string `json:"includes,omitempty"`
+	Redirects      []string `json:"redirects,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
+type DMARCAnalysis struct {
+	Record         string   `json:"record"`
+	HasDMARC       bool     `json:"hasDMARC"`
+	Policy         string   `json:"policy,omitempty"`        // "none", "quarantine", "reject"
+	SubdomainPolicy string  `json:"subdomainPolicy,omitempty"`
+	Percent        int      `json:"percent,omitempty"`
+	RUA            []string `json:"rua,omitempty"`
+	RUF            []string `json:"ruf,omitempty"`
+	Alignment      Alignment `json:"alignment,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
+type Alignment struct {
+	SPF string `json:"spf,omitempty"` // "r" (relaxed), "s" (strict)
+	DKIM string `json:"dkim,omitempty"`
+}
+
+type DKIMAnalysis struct {
+	RecordsFound  int      `json:"recordsFound"`
+	Selectors     []string `json:"selectors,omitempty"`
+	KeyTypes      []string `json:"keyTypes,omitempty"`
+	KeySizes      []int    `json:"keySizes,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 type RDAPInfo struct {
 	IP            string `json:"ip"`
@@ -230,12 +294,203 @@ func (a *App) EnumerateSubdomains(domain string, wordlist []string, brute bool) 
 	if len(r.Names) > discoveryLimit {
 		r.Names = r.Names[:discoveryLimit]
 	}
+
+	// Check for subdomain takeover clues (dangling CNAMEs)
+	r.TakeoverClues = checkTakeoverClues(r.Names)
+
 	_ = a.saveHistory("subdomain", d, r)
 	return r
 }
 
+// checkTakeoverClues checks discovered subdomains for dangling CNAME records
+// pointing to known cloud hosting providers that may indicate takeover risk.
+func checkTakeoverClues(subdomains []string) []TakeoverClue {
+	var clues []TakeoverClue
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res := net.DefaultResolver
+
+	// Known cloud provider CNAME patterns
+	providerPatterns := map[string][]struct {
+		pattern     string
+		provider    string
+		checkUnclaimed func(string) (bool, string)
+	}{
+		"github.io": {
+			{pattern: "github.io", provider: "GitHub Pages",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "GitHub Pages: verify the repository exists and has Pages enabled"
+				}},
+		},
+		"herokuapp.com": {
+			{pattern: "herokuapp.com", provider: "Heroku",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Heroku: verify the app exists and is not deleted"
+				}},
+		},
+		"vercel.app": {
+			{pattern: "vercel.app", provider: "Vercel",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Vercel: verify the project exists and is deployed"
+				}},
+			{pattern: "now.sh", provider: "Vercel (legacy now.sh)",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Vercel (legacy): verify the project exists"
+				}},
+		},
+		"netlify.app": {
+			{pattern: "netlify.app", provider: "Netlify",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Netlify: verify the site exists and is deployed"
+				}},
+			{pattern: "netlify.com", provider: "Netlify (legacy)",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Netlify: verify the site exists"
+				}},
+		},
+		"amazonaws.com": {
+			{pattern: "s3.amazonaws.com", provider: "AWS S3",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "AWS S3: verify the bucket exists and is configured for static website hosting"
+				}},
+			{pattern: "cloudfront.net", provider: "AWS CloudFront",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "AWS CloudFront: verify the distribution exists"
+				}},
+			{pattern: "elasticbeanstalk.com", provider: "AWS Elastic Beanstalk",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "AWS Elastic Beanstalk: verify the environment exists"
+				}},
+		},
+		"azure.com": {
+			{pattern: "azurewebsites.net", provider: "Azure App Service",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Azure App Service: verify the web app exists"
+				}},
+			{pattern: "blob.core.windows.net", provider: "Azure Blob Storage",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Azure Blob Storage: verify the storage account and container exist"
+				}},
+			{pattern: "trafficmanager.net", provider: "Azure Traffic Manager",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Azure Traffic Manager: verify the profile exists"
+				}},
+		},
+		"surge.sh": {
+			{pattern: "surge.sh", provider: "Surge.sh",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Surge.sh: verify the project exists"
+				}},
+		},
+		"firebaseapp.com": {
+			{pattern: "firebaseapp.com", provider: "Firebase Hosting",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Firebase Hosting: verify the project exists"
+				}},
+			{pattern: "web.app", provider: "Firebase Hosting (web.app)",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Firebase Hosting: verify the project exists"
+				}},
+		},
+		"gitlab.io": {
+			{pattern: "gitlab.io", provider: "GitLab Pages",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "GitLab Pages: verify the project exists and Pages is enabled"
+				}},
+		},
+		"shopify.com": {
+			{pattern: "myshopify.com", provider: "Shopify",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Shopify: verify the store exists"
+				}},
+		},
+		"ghost.io": {
+			{pattern: "ghost.io", provider: "Ghost",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Ghost: verify the publication exists"
+				}},
+		},
+		"wpengine.com": {
+			{pattern: "wpengine.com", provider: "WP Engine",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "WP Engine: verify the site exists"
+				}},
+		},
+		"fastly.net": {
+			{pattern: "fastly.net", provider: "Fastly",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Fastly: verify the service exists"
+				}},
+		},
+		"pantheon.io": {
+			{pattern: "pantheon.io", provider: "Pantheon",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Pantheon: verify the site exists"
+				}},
+		},
+		"bitbucket.io": {
+			{pattern: "bitbucket.io", provider: "Bitbucket Pages",
+				checkUnclaimed: func(target string) (bool, string) {
+					return true, "Bitbucket Pages: verify the repository exists"
+				}},
+		},
+	}
+
+	for _, sub := range subdomains {
+		cnames, err := res.LookupCNAME(ctx, sub)
+		if err != nil {
+			continue
+		}
+		cname := strings.TrimSuffix(cnames, ".")
+		if cname == "" || cname == sub {
+			continue
+		}
+
+		matched := false
+		for _, patterns := range providerPatterns {
+			for _, p := range patterns {
+				if strings.Contains(strings.ToLower(cname), p.pattern) {
+					// Try to resolve the CNAME target to check if it exists
+					ips, err := res.LookupIPAddr(ctx, cname)
+					status := "potential"
+					evidence := fmt.Sprintf("CNAME points to %s (%s)", cname, p.provider)
+					
+					if err != nil || len(ips) == 0 {
+						status = "unresolved"
+						evidence = fmt.Sprintf("CNAME target %s does not resolve (%s)", cname, p.provider)
+					} else {
+						// For some providers, we can do additional checks
+						// For now, mark as "potential" if it resolves
+						// A more thorough check would require HTTP requests
+					}
+
+					unclaimed, remediation := p.checkUnclaimed(cname)
+					if unclaimed && status == "unresolved" {
+						status = "unclaimed"
+					}
+
+					clues = append(clues, TakeoverClue{
+						Subdomain:   sub,
+						CNAMETarget: cname,
+						Provider:    p.provider,
+						Status:      status,
+						Evidence:    evidence,
+						Remediation: remediation,
+					})
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+	}
+	return clues
+}
+
 // FuzzPaths sends bounded HEAD requests only; it never reads response bodies. Redirects are disabled.
-func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int) PathFuzzResult {
+func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, proxyURL string) PathFuzzResult {
 	u, err := validateDiscoveryURL(baseURL)
 	r := PathFuzzResult{BaseURL: baseURL, Paths: []PathFinding{}}
 	if err != nil { r.Error = err.Error(); return r }
@@ -244,7 +499,7 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 	if requestDelayMs < 0 { requestDelayMs = 0 }
 	if requestDelayMs > 5000 { requestDelayMs = 5000 }
 	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
-	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds})
+	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds, ProxyURL: proxyURL})
 	ua := profile.UserAgent
 	clean := make([]string, 0, min(len(paths), discoveryLimit))
 	seen := map[string]bool{}
@@ -255,7 +510,7 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 		clean = append(clean, p)
 		if len(clean) >= discoveryLimit { break }
 	}
-	client := &http.Client{Timeout: time.Duration(profile.TimeoutSeconds) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := newScopedHTTPClientForFuzzer(u.String(), profile)
 	baselineStatus, baselineLength := 0, int64(-1)
 	if req, e := http.NewRequest(http.MethodHead, joinFuzzURL(u, "/__codexa_missing_probe_7f31d9"), nil); e == nil {
 		req.Header.Set("User-Agent", ua)
@@ -316,6 +571,24 @@ func isGenericNotFound(status int, size int64, baselineStatus int, baselineSize 
 	// When the server omits Content-Length, conservatively treat matching status
 	// codes as catch-all responses; otherwise require both status and size to match.
 	return baselineSize < 0 || size < 0 || size == baselineSize
+}
+
+func newScopedHTTPClientForFuzzer(target string, profile HTTPRequestProfile) *http.Client {
+	prof := resolveHTTPRequestProfile(profile)
+	return &http.Client{
+		Timeout: time.Duration(prof.TimeoutSeconds) * time.Second,
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				if prof.ProxyURL == "" {
+					return nil, nil
+				}
+				return url.Parse(prof.ProxyURL)
+			},
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func joinFuzzURL(base *url.URL, p string) string {
@@ -438,8 +711,8 @@ func (a *App) DNSIntelligence(domain string, includeRDAP bool) DNSIntelligenceRe
 	d, err := validateDiscoveryDomain(domain)
 	r := DNSIntelligenceResult{
 		Domain: d, A: []string{}, AAAA: []string{}, MX: []string{}, NS: []string{},
-		TXT: []string{}, SPF: []string{}, DMARC: []string{}, PTR: map[string][]string{},
-		RDAP: []RDAPInfo{},
+		TXT: []string{}, SPF: []string{}, DMARC: []string{}, DKIM: []DKIMRecord{},
+		PTR: map[string][]string{}, RDAP: []RDAPInfo{},
 	}
 	if err != nil {
 		r.Errors = append(r.Errors, err.Error())
@@ -488,6 +761,22 @@ func (a *App) DNSIntelligence(domain string, includeRDAP bool) DNSIntelligenceRe
 	if txt, e := res.LookupTXT(ctx, "_dmarc."+d); e == nil {
 		r.DMARC = txt
 	}
+
+	// DKIM lookup for common selectors
+	commonSelectors := []string{"default", "google", "k1", "k2", "selector1", "selector2", "dkim", "mail", "email", "s1", "s2", "2023", "2024"}
+	for _, selector := range commonSelectors {
+		dkimDomain := selector + "._domainkey." + d
+		if txt, e := res.LookupTXT(ctx, dkimDomain); e == nil && len(txt) > 0 {
+			for _, v := range txt {
+				if strings.HasPrefix(strings.ToLower(v), "v=dkim1") {
+					dkimRec := parseDKIMRecord(selector, v)
+					r.DKIM = append(r.DKIM, dkimRec)
+					break
+				}
+			}
+		}
+	}
+
 	sortStrings(r.A)
 	sortStrings(r.AAAA)
 	sortStrings(r.MX)
@@ -495,6 +784,10 @@ func (a *App) DNSIntelligence(domain string, includeRDAP bool) DNSIntelligenceRe
 	sortStrings(r.TXT)
 	sortStrings(r.SPF)
 	sortStrings(r.DMARC)
+
+	// Analyze email security policies
+	r.EmailPolicy = analyzeEmailPolicies(r.SPF, r.DMARC, r.DKIM)
+
 	_ = a.saveHistory("dns", d, r)
 	return r
 }
@@ -596,4 +889,294 @@ func sortStrings(v []string) {
 			v[j], v[j-1] = v[j-1], v[j]
 		}
 	}
+}
+
+func parseDKIMRecord(selector, record string) DKIMRecord {
+	dkim := DKIMRecord{Selector: selector, Record: record}
+	// Parse v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
+	parts := strings.Split(record, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "k=") {
+			dkim.KeyType = strings.TrimPrefix(part, "k=")
+		}
+		if strings.HasPrefix(part, "p=") {
+			pubKey := strings.TrimPrefix(part, "p=")
+			// Estimate key size from base64 encoded public key
+			if len(pubKey) > 0 {
+				decoded, err := base64.StdEncoding.DecodeString(pubKey)
+				if err == nil && len(decoded) > 0 {
+					// Rough estimation: RSA key size in bits ≈ (decoded bytes - overhead) * 8
+					// For RSA, the modulus is typically the bulk of the key
+					dkim.KeySize = estimateRSAKeySize(decoded)
+				}
+			}
+		}
+		if strings.HasPrefix(part, "h=") {
+			dkim.Note = "hash: " + strings.TrimPrefix(part, "h=")
+		}
+		if strings.HasPrefix(part, "s=") {
+			if dkim.Note != "" {
+				dkim.Note += ", "
+			}
+			dkim.Note += "service: " + strings.TrimPrefix(part, "s=")
+		}
+	}
+	if dkim.KeySize > 0 && dkim.KeySize < 2048 {
+		dkim.Note += " (key size < 2048 bits, considered weak)"
+	}
+	return dkim
+}
+
+func estimateRSAKeySize(der []byte) int {
+	// Very rough estimation: try to parse as ASN.1 DER to find modulus
+	// For simplicity, use length-based estimation
+	// Typical RSA public key DER: SEQUENCE { modulus INTEGER, exponent INTEGER }
+	// modulus length in bytes ≈ key size / 8
+	if len(der) > 100 {
+		// Modulus is usually the largest component
+		return (len(der) - 20) * 8 // rough estimate
+	}
+	return 0
+}
+
+func analyzeEmailPolicies(spfRecords, dmarcRecords []string, dkimRecords []DKIMRecord) *EmailPolicyAnalysis {
+	analysis := &EmailPolicyAnalysis{
+		SPF:   analyzeSPF(spfRecords),
+		DMARC: analyzeDMARC(dmarcRecords),
+		DKIM:  analyzeDKIM(dkimRecords),
+	}
+	analysis.Rating = calculateEmailPolicyRating(analysis)
+	return analysis
+}
+
+func analyzeSPF(records []string) SPFAnalysis {
+	result := SPFAnalysis{}
+	if len(records) == 0 {
+		result.Warnings = append(result.Warnings, "No SPF record found")
+		return result
+	}
+	record := records[0] // Use first SPF record
+	result.Record = record
+	result.HasSPF = true
+
+	// Parse mechanisms
+	parts := strings.Fields(record)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		lower := strings.ToLower(part)
+
+		// Check all mechanism
+		if lower == "+all" || lower == "~all" || lower == "-all" || lower == "?all" {
+			result.AllMechanism = part
+			if lower == "+all" {
+				result.Warnings = append(result.Warnings, "SPF uses '+all' (allows any sender) - HIGH RISK")
+			} else if lower == "~all" {
+				result.Warnings = append(result.Warnings, "SPF uses '~all' (soft fail) - consider '-all' for stricter policy")
+			}
+		}
+
+		// Check includes
+		if strings.HasPrefix(lower, "include:") {
+			result.Includes = append(result.Includes, strings.TrimPrefix(part, "include:"))
+		}
+
+		// Check redirects
+		if strings.HasPrefix(lower, "redirect=") {
+			result.Redirects = append(result.Redirects, strings.TrimPrefix(part, "redirect="))
+		}
+
+		// Check for weak mechanisms
+		if strings.HasPrefix(lower, "ip4:") || strings.HasPrefix(lower, "ip6:") {
+			// These are fine, just note them
+		}
+		if strings.HasPrefix(lower, "a") || strings.HasPrefix(lower, "mx") || strings.HasPrefix(lower, "ptr") {
+			result.WeakMechanisms = append(result.WeakMechanisms, part)
+		}
+		// Check for deprecated "ptr" mechanism
+		if lower == "ptr" {
+			result.Warnings = append(result.Warnings, "SPF uses deprecated 'ptr' mechanism")
+		}
+	}
+
+	// Check for missing all mechanism
+	if result.AllMechanism == "" {
+		result.Warnings = append(result.Warnings, "SPF record missing 'all' mechanism (defaults to '?all' - neutral)")
+	}
+
+	return result
+}
+
+func analyzeDMARC(records []string) DMARCAnalysis {
+	result := DMARCAnalysis{}
+	if len(records) == 0 {
+		result.Warnings = append(result.Warnings, "No DMARC record found (_dmarc subdomain missing)")
+		return result
+	}
+	record := records[0]
+	result.Record = record
+	result.HasDMARC = true
+
+	// Parse DMARC tags
+	parts := strings.Split(record, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		lower := strings.ToLower(part)
+
+		if strings.HasPrefix(lower, "p=") {
+			result.Policy = strings.TrimPrefix(part, "p=")
+			if result.Policy == "none" {
+				result.Warnings = append(result.Warnings, "DMARC policy is 'p=none' (monitor only) - consider 'p=quarantine' or 'p=reject'")
+			} else if result.Policy == "quarantine" {
+				result.Warnings = append(result.Warnings, "DMARC policy is 'p=quarantine' - consider 'p=reject' for strongest protection")
+			}
+		}
+		if strings.HasPrefix(lower, "sp=") {
+			result.SubdomainPolicy = strings.TrimPrefix(part, "sp=")
+		}
+		if strings.HasPrefix(lower, "pct=") {
+			if pct, err := strconv.Atoi(strings.TrimPrefix(part, "pct=")); err == nil {
+				result.Percent = pct
+				if pct < 100 {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("DMARC percent is %d%% (not 100%%)", pct))
+				}
+			}
+		}
+		if strings.HasPrefix(lower, "rua=") {
+			result.RUA = append(result.RUA, strings.TrimPrefix(part, "rua="))
+		}
+		if strings.HasPrefix(lower, "ruf=") {
+			result.RUF = append(result.RUF, strings.TrimPrefix(part, "ruf="))
+		}
+		if strings.HasPrefix(lower, "aspf=") {
+			result.Alignment.SPF = strings.TrimPrefix(part, "aspf=")
+		}
+		if strings.HasPrefix(lower, "adkim=") {
+			result.Alignment.DKIM = strings.TrimPrefix(part, "adkim=")
+		}
+	}
+
+	// Default values if not specified
+	if result.Policy == "" {
+		result.Policy = "none"
+		result.Warnings = append(result.Warnings, "DMARC policy tag 'p=' missing (defaults to 'none')")
+	}
+	if result.Percent == 0 {
+		result.Percent = 100
+	}
+	if result.Alignment.SPF == "" {
+		result.Alignment.SPF = "r"
+	}
+	if result.Alignment.DKIM == "" {
+		result.Alignment.DKIM = "r"
+	}
+
+	return result
+}
+
+func analyzeDKIM(records []DKIMRecord) DKIMAnalysis {
+	result := DKIMAnalysis{
+		RecordsFound: len(records),
+		Selectors:    make([]string, 0, len(records)),
+		KeyTypes:     make([]string, 0, len(records)),
+		KeySizes:     make([]int, 0, len(records)),
+	}
+	seenSelectors := make(map[string]bool)
+	seenKeyTypes := make(map[string]bool)
+	seenKeySizes := make(map[int]bool)
+
+	for _, rec := range records {
+		if !seenSelectors[rec.Selector] {
+			seenSelectors[rec.Selector] = true
+			result.Selectors = append(result.Selectors, rec.Selector)
+		}
+		if rec.KeyType != "" && !seenKeyTypes[rec.KeyType] {
+			seenKeyTypes[rec.KeyType] = true
+			result.KeyTypes = append(result.KeyTypes, rec.KeyType)
+		}
+		if rec.KeySize > 0 && !seenKeySizes[rec.KeySize] {
+			seenKeySizes[rec.KeySize] = true
+			result.KeySizes = append(result.KeySizes, rec.KeySize)
+			if rec.KeySize < 2048 {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("DKIM selector '%s' uses %d-bit key (recommend >= 2048 bits)", rec.Selector, rec.KeySize))
+			}
+		}
+		if rec.Note != "" {
+			result.Warnings = append(result.Warnings, rec.Note)
+		}
+	}
+
+	if len(records) == 0 {
+		result.Warnings = append(result.Warnings, "No DKIM records found for common selectors (checked: default, google, k1, k2, selector1, selector2, dkim, mail, email, s1, s2, 2023, 2024)")
+	} else if len(records) == 1 {
+		result.Warnings = append(result.Warnings, "Only one DKIM selector found - consider multiple selectors for key rotation")
+	}
+
+	return result
+}
+
+func calculateEmailPolicyRating(analysis *EmailPolicyAnalysis) string {
+	score := 0
+	maxScore := 0
+
+	// SPF scoring (max 3)
+	maxScore += 3
+	if analysis.SPF.HasSPF {
+		score += 1
+		if analysis.SPF.AllMechanism == "-all" {
+			score += 2
+		} else if analysis.SPF.AllMechanism == "~all" {
+			score += 1
+		} else if analysis.SPF.AllMechanism == "+all" {
+			score -= 1 // penalty
+		}
+	}
+
+	// DMARC scoring (max 4)
+	maxScore += 4
+	if analysis.DMARC.HasDMARC {
+		score += 1
+		if analysis.DMARC.Policy == "reject" {
+			score += 3
+		} else if analysis.DMARC.Policy == "quarantine" {
+			score += 2
+		} else if analysis.DMARC.Policy == "none" {
+			score += 0
+		}
+		if analysis.DMARC.Percent == 100 {
+			score += 1
+		}
+	}
+
+	// DKIM scoring (max 3)
+	maxScore += 3
+	if analysis.DKIM.RecordsFound > 0 {
+		score += 1
+		strongKeys := 0
+		for _, size := range analysis.DKIM.KeySizes {
+			if size >= 2048 {
+				strongKeys++
+			}
+		}
+		if strongKeys > 0 {
+			score += 1
+		}
+		if analysis.DKIM.RecordsFound > 1 {
+			score += 1
+		}
+	}
+
+	// Calculate percentage
+	if maxScore == 0 {
+		return "missing"
+	}
+	pct := float64(score) / float64(maxScore)
+	if pct >= 0.8 {
+		return "strong"
+	} else if pct >= 0.5 {
+		return "moderate"
+	} else if pct >= 0.2 {
+		return "weak"
+	}
+	return "missing"
 }
