@@ -560,7 +560,7 @@ func (a *App) PauseScans() {
 	a.rateMu.Lock()
 	a.scanPaused = true
 	a.rateMu.Unlock()
-	runtime.EventsEmit(a.ctx, "scan:control", "paused")
+	a.emitScanControl("paused")
 }
 
 func (a *App) ResumeScans() {
@@ -569,7 +569,13 @@ func (a *App) ResumeScans() {
 	a.scanPaused = false
 	if a.pauseCond != nil { a.pauseCond.Broadcast() }
 	a.rateMu.Unlock()
-	runtime.EventsEmit(a.ctx, "scan:control", "running")
+	a.emitScanControl("running")
+}
+
+func (a *App) emitScanControl(state string) {
+	if a != nil && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "scan:control", state)
+	}
 }
 
 func (a *App) IsScansPaused() bool {

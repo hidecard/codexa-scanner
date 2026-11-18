@@ -1,19 +1,19 @@
-﻿# Release & Installer Verification (v1.0)
+﻿# Release & Installer Verification (v1.1.0)
 
-This document covers GitHub release packaging (v1.0) and the required clean-machine verification for Linux `.deb` and Windows `.exe` artifacts.
+This document covers GitHub release packaging (v1.1.0) and the required clean-machine verification for Linux `.deb` and Windows `.exe` artifacts.
 
 ## CI/CD and release workflow
 
 - Workflow: `.github/workflows/build.yml`
 - Permissions: top-level `contents: read`; only the `release` job has `contents: write`.
-- Linux job (`ubuntu-22.04`): installs build deps + Wails + nfpm, builds app, runs `go test -race ./...` and `go vet ./...`, packages `build/bin/CodexaScanner_1.0.0_amd64.deb`, uploads artifact.
+- Linux job (`ubuntu-22.04`): installs build deps + Wails + nfpm, builds app, runs `go test -race ./...` and `go vet ./...`, packages `build/bin/CodexaScanner_1.1.0_amd64.deb`, uploads artifact.
 - Windows job (`windows-latest`): builds `CodexaScanner.exe`, runs `go test ./...` and `go vet ./...` (note: `-race` is not supported on `windows/386` toolchains; Linux CI provides race coverage), uploads artifact.
-- Release job (tag push `v*`, e.g. `v1.0.0`): downloads artifacts, collects `.deb`/`.exe` into `dist/`, publishes GitHub Release with generated notes and attached assets.
+- Release job (tag push `v*`, e.g. `v1.1.0`): downloads artifacts, collects `.deb`/`.exe` into `dist/`, publishes GitHub Release with generated notes and attached assets.
 
-## v1.0 release steps (maintainers)
+## v1.1.0 release steps (maintainers)
 
-1. Ensure `main` is green (tests, vet, frontend build) and versioned packaging is correct (`nfpm.yaml` version `1.0.0`, DEB filename in workflow matches).
-2. Create and push tag: `git tag v1.0.0 && git push origin v1.0.0`.
+1. Ensure `main` is green (tests, vet, frontend build) and versioned packaging is correct (`nfpm.yaml` version `1.1.0`, DEB filename in workflow matches).
+2. Create and push tag: `git tag v1.1.0 && git push origin v1.1.0`.
 3. Confirm GitHub Actions builds Linux DEB + Windows EXE and publishes release assets.
 4. Perform clean-machine install/upgrade/uninstall verification (below) before announcing the release.
 
@@ -23,7 +23,7 @@ Perform on **fresh VMs/PCs** (no prior Codexa Scanner install/state unless testi
 
 ### Linux (.deb)
 
-1. **Install:** `sudo apt install ./CodexaScanner_1.0.0_amd64.deb` (or `dpkg -i` + dependency fix). Verify app launches and core modules open.
+1. **Install:** `sudo apt install ./CodexaScanner_1.1.0_amd64.deb` (or `dpkg -i` + dependency fix). Verify app launches and core modules open.
 2. **Data creation:** Run a small authorized scan/export and confirm local history is created at the user config path (typically `~/.config/CodexaScanner/history.sqlite` or OS-equivalent XDG config dir).
 3. **Upgrade:** Install newer package build/version over existing install (when available). Verify app launches and **SQLite history data retention** (existing records still visible) unless explicitly documented otherwise.
 4. **Uninstall:** `sudo apt remove codexa-scanner` (and/or `purge` if applicable). Verify binary removal and document whether `CodexaScanner/history.sqlite` in the user config directory is retained or removed (user data is typically retained on remove; confirm actual behavior).

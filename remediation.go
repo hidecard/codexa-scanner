@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -23,14 +24,52 @@ type StackFix struct {
 	Verify string `json:"verify"`
 }
 
+// UnmarshalJSON keeps the embedded knowledge base backward-compatible with
+// the compact [file, before, after, deploy, verify] form used by older entries.
+func (s *StackFix) UnmarshalJSON(data []byte) error {
+	var values []string
+	if err := json.Unmarshal(data, &values); err == nil {
+		if len(values) != 5 {
+			return fmt.Errorf("stack fix array must contain 5 strings, got %d", len(values))
+		}
+		*s = StackFix{File: values[0], Before: values[1], After: values[2], Deploy: values[3], Verify: values[4]}
+		return nil
+	}
+	var object struct {
+		File   json.RawMessage `json:"file"`
+		Before json.RawMessage `json:"before"`
+		After  json.RawMessage `json:"after"`
+		Deploy json.RawMessage `json:"deploy"`
+		Verify json.RawMessage `json:"verify"`
+	}
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	var fileValues []string
+	if err := json.Unmarshal(object.File, &fileValues); err == nil {
+		if len(fileValues) != 5 {
+			return fmt.Errorf("stack fix file array must contain 5 strings, got %d", len(fileValues))
+		}
+		*s = StackFix{File: fileValues[0], Before: fileValues[1], After: fileValues[2], Deploy: fileValues[3], Verify: fileValues[4]}
+		return nil
+	}
+	decode := func(raw json.RawMessage) string {
+		var value string
+		_ = json.Unmarshal(raw, &value)
+		return value
+	}
+	*s = StackFix{File: decode(object.File), Before: decode(object.Before), After: decode(object.After), Deploy: decode(object.Deploy), Verify: decode(object.Verify)}
+	return nil
+}
+
 type RemediationEntry struct {
-	ID               string              `json:"id"`
-	Title            BilingualText       `json:"title"`
-	Mechanism        BilingualText       `json:"mechanism"`
-	CommonMistakes   BilingualTextList   `json:"commonMistakes"`
-	AttackScenario   BilingualText       `json:"attackScenario"`
-	WhereToFix       BilingualText       `json:"whereToFix"`
-	Stacks           map[string]StackFix `json:"stacks"`
+	ID             string              `json:"id"`
+	Title          BilingualText       `json:"title"`
+	Mechanism      BilingualText       `json:"mechanism"`
+	CommonMistakes BilingualTextList   `json:"commonMistakes"`
+	AttackScenario BilingualText       `json:"attackScenario"`
+	WhereToFix     BilingualText       `json:"whereToFix"`
+	Stacks         map[string]StackFix `json:"stacks"`
 }
 
 type BilingualTextList struct {
