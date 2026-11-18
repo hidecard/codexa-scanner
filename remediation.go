@@ -67,19 +67,25 @@ func (s *StackFix) UnmarshalJSON(data []byte) error {
 }
 
 type RemediationEntry struct {
-	ID                 string              `json:"id"`
-	Title              BilingualText       `json:"title"`
-	Mechanism          BilingualText       `json:"mechanism"`
-	RootCause          BilingualText       `json:"rootCause"`
-	Impact             BilingualText       `json:"impact"`
-	CommonMistakes     BilingualTextList   `json:"commonMistakes"`
-	AttackScenario     BilingualText       `json:"attackScenario"`
-	AttackSteps        BilingualTextList   `json:"attackSteps"`
-	WhereToFix         BilingualText       `json:"whereToFix"`
-	VerificationSteps  BilingualTextList   `json:"verificationSteps"`
-	FalsePositiveNotes BilingualText       `json:"falsePositiveNotes"`
-	References         []string            `json:"references"`
-	Stacks             map[string]StackFix `json:"stacks"`
+	ID                  string              `json:"id"`
+	Title               BilingualText       `json:"title"`
+	Mechanism           BilingualText       `json:"mechanism"`
+	RootCause           BilingualText       `json:"rootCause"`
+	Impact              BilingualText       `json:"impact"`
+	Severity            string              `json:"severity"`
+	Priority            string              `json:"priority"`
+	ChangeRisk          string              `json:"changeRisk"`
+	Prerequisites       BilingualTextList   `json:"prerequisites"`
+	ImplementationNotes BilingualTextList   `json:"implementationNotes"`
+	CommonMistakes      BilingualTextList   `json:"commonMistakes"`
+	AttackScenario      BilingualText       `json:"attackScenario"`
+	AttackSteps         BilingualTextList   `json:"attackSteps"`
+	WhereToFix          BilingualText       `json:"whereToFix"`
+	VerificationSteps   BilingualTextList   `json:"verificationSteps"`
+	FalsePositiveNotes  BilingualText       `json:"falsePositiveNotes"`
+	References          []string            `json:"references"`
+	RelatedFindings     []string            `json:"relatedFindings"`
+	Stacks              map[string]StackFix `json:"stacks"`
 }
 
 type BilingualTextList struct {

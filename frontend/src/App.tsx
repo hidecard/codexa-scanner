@@ -1451,9 +1451,11 @@ ${rows || '<p>No results.</p>'}
               </div>
               {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
                 <div className="mt-4 space-y-4 text-sm">
+                  <section className="rounded border border-slate-800 bg-slate-950/50 p-3"><div className="flex flex-wrap gap-2 text-xs"><span className="rounded bg-rose-950/60 px-2 py-1 text-rose-300">Severity: {g.severity || 'review'}</span><span className="rounded bg-sky-950/60 px-2 py-1 text-sky-300">Priority: {g.priority || 'P2'}</span><span className="rounded bg-amber-950/60 px-2 py-1 text-amber-300">Change risk: {g.changeRisk || 'unknown'}</span></div></section>
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Root cause</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'rootCause')}</p></section>
                   <section><h4 className="font-semibold text-rose-300">Potential impact</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'impact')}</p></section>
+                  <section><h4 className="font-semibold text-emerald-300">Prerequisites before changing</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{guideList(g,'prerequisites').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul><ul className="mt-2 list-disc pl-5 text-xs text-slate-400">{guideList(g,'implementationNotes').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>
                   <section><h4 className="font-semibold text-emerald-300">Common developer mistakes</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{guideList(g,'commonMistakes').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>
                   <section><h4 className="font-semibold text-emerald-300">Attack scenario</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'attackScenario')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Step-by-step safe walkthrough</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'attackSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
@@ -1475,6 +1477,7 @@ ${rows || '<p>No results.</p>'}
                     ) : <p className="mt-2 text-xs text-slate-400">No stack-specific snippet available for this stack.</p>}
                   </section>
                   <section><h4 className="font-semibold text-emerald-300">Verification checklist</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'verificationSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
+                  {!!g.relatedFindings?.length && <section><h4 className="font-semibold text-emerald-300">Related finding IDs</h4><div className="mt-1 flex flex-wrap gap-1">{g.relatedFindings.map((x:string)=><span key={x} className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300">{x}</span>)}</div></section>}
                   {!!g.references?.length && <section><h4 className="font-semibold text-emerald-300">Further reading</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{g.references.map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>}
                 </div>
               )}

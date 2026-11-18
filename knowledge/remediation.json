@@ -131,6 +131,29 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "tls-expiring"
       ]
     },
     {
@@ -264,6 +287,29 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "https-not-enforced",
+        "tls-expiring"
       ]
     },
     {
@@ -397,6 +443,30 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-eval",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -530,6 +600,29 @@
       "references": [
         "OWASP Secure Headers Project",
         "MDN HTTP Headers"
+      ],
+      "severity": "low",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Capture effective headers from normal, error, redirect, and asset responses at the user-facing edge."
+        ],
+        "my": [
+          "User-facing edge ရှိ normal၊ error၊ redirect နှင့် asset response များ၏ effective header ကို သိမ်းပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Check CDN/proxy header inheritance and cache behavior before declaring the control effective."
+        ],
+        "my": [
+          "Control သက်ရောက်မှုရှိပြီဟု မသတ်မှတ်မီ CDN/proxy inheritance နှင့် cache behavior ကို စစ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-missing",
+        "hsts-missing"
       ]
     },
     {
@@ -663,6 +756,30 @@
       "references": [
         "OWASP Secure Headers Project",
         "MDN HTTP Headers"
+      ],
+      "severity": "low",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Capture effective headers from normal, error, redirect, and asset responses at the user-facing edge."
+        ],
+        "my": [
+          "User-facing edge ရှိ normal၊ error၊ redirect နှင့် asset response များ၏ effective header ကို သိမ်းပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Check CDN/proxy header inheritance and cache behavior before declaring the control effective."
+        ],
+        "my": [
+          "Control သက်ရောက်မှုရှိပြီဟု မသတ်မှတ်မီ CDN/proxy inheritance နှင့် cache behavior ကို စစ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "clickjacking-protection-missing",
+        "csp-missing",
+        "hsts-missing"
       ]
     },
     {
@@ -796,6 +913,30 @@
       "references": [
         "OWASP Secure Headers Project",
         "MDN HTTP Headers"
+      ],
+      "severity": "low",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Capture effective headers from normal, error, redirect, and asset responses at the user-facing edge."
+        ],
+        "my": [
+          "User-facing edge ရှိ normal၊ error၊ redirect နှင့် asset response များ၏ effective header ကို သိမ်းပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Check CDN/proxy header inheritance and cache behavior before declaring the control effective."
+        ],
+        "my": [
+          "Control သက်ရောက်မှုရှိပြီဟု မသတ်မှတ်မီ CDN/proxy inheritance နှင့် cache behavior ကို စစ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "clickjacking-protection-missing",
+        "csp-missing",
+        "hsts-missing"
       ]
     },
     {
@@ -929,6 +1070,30 @@
       "references": [
         "OWASP Secure Headers Project",
         "MDN HTTP Headers"
+      ],
+      "severity": "low",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Capture effective headers from normal, error, redirect, and asset responses at the user-facing edge."
+        ],
+        "my": [
+          "User-facing edge ရှိ normal၊ error၊ redirect နှင့် asset response များ၏ effective header ကို သိမ်းပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Check CDN/proxy header inheritance and cache behavior before declaring the control effective."
+        ],
+        "my": [
+          "Control သက်ရောက်မှုရှိပြီဟု မသတ်မှတ်မီ CDN/proxy inheritance နှင့် cache behavior ကို စစ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "clickjacking-protection-missing",
+        "csp-missing",
+        "hsts-missing"
       ]
     },
     {
@@ -1062,6 +1227,30 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "https-not-enforced",
+        "tls-expiring"
       ]
     },
     {
@@ -1195,6 +1384,30 @@
       "references": [
         "OWASP Secure Headers Project",
         "MDN HTTP Headers"
+      ],
+      "severity": "low",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Capture effective headers from normal, error, redirect, and asset responses at the user-facing edge."
+        ],
+        "my": [
+          "User-facing edge ရှိ normal၊ error၊ redirect နှင့် asset response များ၏ effective header ကို သိမ်းပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Check CDN/proxy header inheritance and cache behavior before declaring the control effective."
+        ],
+        "my": [
+          "Control သက်ရောက်မှုရှိပြီဟု မသတ်မှတ်မီ CDN/proxy inheritance နှင့် cache behavior ကို စစ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "clickjacking-protection-missing",
+        "csp-missing",
+        "hsts-missing"
       ]
     },
     {
@@ -1328,6 +1541,29 @@
       "references": [
         "OWASP Session Management Cheat Sheet",
         "MDN Set-Cookie"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Identify session, refresh, CSRF, preference, and analytics cookies before changing defaults."
+        ],
+        "my": [
+          "Session၊ refresh၊ CSRF၊ preference နှင့် analytics cookie များကို default ပြောင်းမီ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Coordinate flag changes with session invalidation, client compatibility, and HTTPS availability."
+        ],
+        "my": [
+          "Flag ပြောင်းလဲမှုကို session invalidation၊ client compatibility နှင့် HTTPS availability နှင့် ညှိနှိုင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cookie-httponly-missing",
+        "cookie-samesite-missing"
       ]
     },
     {
@@ -1461,6 +1697,29 @@
       "references": [
         "OWASP Session Management Cheat Sheet",
         "MDN Set-Cookie"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Identify session, refresh, CSRF, preference, and analytics cookies before changing defaults."
+        ],
+        "my": [
+          "Session၊ refresh၊ CSRF၊ preference နှင့် analytics cookie များကို default ပြောင်းမီ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Coordinate flag changes with session invalidation, client compatibility, and HTTPS availability."
+        ],
+        "my": [
+          "Flag ပြောင်းလဲမှုကို session invalidation၊ client compatibility နှင့် HTTPS availability နှင့် ညှိနှိုင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cookie-samesite-missing",
+        "cookie-secure-missing"
       ]
     },
     {
@@ -1594,6 +1853,29 @@
       "references": [
         "OWASP Session Management Cheat Sheet",
         "MDN Set-Cookie"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Identify session, refresh, CSRF, preference, and analytics cookies before changing defaults."
+        ],
+        "my": [
+          "Session၊ refresh၊ CSRF၊ preference နှင့် analytics cookie များကို default ပြောင်းမီ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Coordinate flag changes with session invalidation, client compatibility, and HTTPS availability."
+        ],
+        "my": [
+          "Flag ပြောင်းလဲမှုကို session invalidation၊ client compatibility နှင့် HTTPS availability နှင့် ညှိနှိုင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cookie-httponly-missing",
+        "cookie-secure-missing"
       ]
     },
     {
@@ -1727,6 +2009,29 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-eval"
       ]
     },
     {
@@ -1860,6 +2165,29 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -1993,6 +2321,30 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-eval",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -2126,6 +2478,29 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-script-unsafe-eval",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -2259,6 +2634,30 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-eval",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -2392,6 +2791,30 @@
       "references": [
         "OWASP Content Security Policy Cheat Sheet",
         "MDN Content-Security-Policy"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Inventory legitimate scripts, styles, frames, objects, workers, and reporting endpoints before tightening policy."
+        ],
+        "my": [
+          "Policy တင်းကျပ်မလုပ်မီ legitimate scripts၊ styles၊ frames၊ objects၊ workers နှင့် reporting endpoint များကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Deploy first in report-only or staging, then enforce after browser telemetry review."
+        ],
+        "my": [
+          "ပထမ report-only/staging တွင် deploy လုပ်ပြီး browser telemetry review ပြီးမှ enforce လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "csp-default-src-missing",
+        "csp-script-unsafe-eval",
+        "csp-script-unsafe-inline"
       ]
     },
     {
@@ -2525,6 +2948,29 @@
       "references": [
         "OWASP CORS Security Cheat Sheet",
         "MDN CORS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "List trusted browser origins and identify whether each endpoint returns public or user-specific data."
+        ],
+        "my": [
+          "ယုံကြည်ရသော browser origin များနှင့် endpoint တစ်ခုချင်းစီ၏ public/user-specific data ကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Test an approved origin and an untrusted fixture without transmitting secrets."
+        ],
+        "my": [
+          "Secret မပို့ဘဲ approved origin နှင့် untrusted fixture ကို စမ်းသပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cors-origin-reflection",
+        "cors-wildcard-credentials"
       ]
     },
     {
@@ -2658,6 +3104,29 @@
       "references": [
         "OWASP CORS Security Cheat Sheet",
         "MDN CORS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "List trusted browser origins and identify whether each endpoint returns public or user-specific data."
+        ],
+        "my": [
+          "ယုံကြည်ရသော browser origin များနှင့် endpoint တစ်ခုချင်းစီ၏ public/user-specific data ကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Test an approved origin and an untrusted fixture without transmitting secrets."
+        ],
+        "my": [
+          "Secret မပို့ဘဲ approved origin နှင့် untrusted fixture ကို စမ်းသပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cors-origin-reflection",
+        "cors-wildcard-origin"
       ]
     },
     {
@@ -2791,6 +3260,29 @@
       "references": [
         "OWASP CORS Security Cheat Sheet",
         "MDN CORS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "List trusted browser origins and identify whether each endpoint returns public or user-specific data."
+        ],
+        "my": [
+          "ယုံကြည်ရသော browser origin များနှင့် endpoint တစ်ခုချင်းစီ၏ public/user-specific data ကို စာရင်းပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Test an approved origin and an untrusted fixture without transmitting secrets."
+        ],
+        "my": [
+          "Secret မပို့ဘဲ approved origin နှင့် untrusted fixture ကို စမ်းသပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "cors-wildcard-credentials",
+        "cors-wildcard-origin"
       ]
     },
     {
@@ -2924,6 +3416,28 @@
       "references": [
         "OWASP JSON Web Token Cheat Sheet",
         "RFC 7519"
+      ],
+      "severity": "high",
+      "priority": "P0",
+      "changeRisk": "high",
+      "prerequisites": {
+        "en": [
+          "Use synthetic tokens and document the expected issuer, audience, algorithms, lifetime, and key rotation."
+        ],
+        "my": [
+          "Synthetic token သုံးပြီး expected issuer၊ audience၊ algorithm၊ lifetime နှင့် key rotation ကို မှတ်တမ်းတင်ပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Roll out verifier changes with key overlap/rotation planning and monitor rejected-token rates."
+        ],
+        "my": [
+          "Verifier change ကို key overlap/rotation plan နှင့်အတူ rollout လုပ်ပြီး rejected-token rate ကို monitor လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "jwt-missing-exp"
       ]
     },
     {
@@ -3057,6 +3571,28 @@
       "references": [
         "OWASP JSON Web Token Cheat Sheet",
         "RFC 7519"
+      ],
+      "severity": "high",
+      "priority": "P0",
+      "changeRisk": "high",
+      "prerequisites": {
+        "en": [
+          "Use synthetic tokens and document the expected issuer, audience, algorithms, lifetime, and key rotation."
+        ],
+        "my": [
+          "Synthetic token သုံးပြီး expected issuer၊ audience၊ algorithm၊ lifetime နှင့် key rotation ကို မှတ်တမ်းတင်ပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Roll out verifier changes with key overlap/rotation planning and monitor rejected-token rates."
+        ],
+        "my": [
+          "Verifier change ကို key overlap/rotation plan နှင့်အတူ rollout လုပ်ပြီး rejected-token rate ကို monitor လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "jwt-alg-none"
       ]
     },
     {
@@ -3190,6 +3726,29 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres"
       ]
     },
     {
@@ -3323,6 +3882,29 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -3456,6 +4038,29 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -3589,6 +4194,30 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -3722,6 +4351,30 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -3855,6 +4508,30 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -3988,6 +4665,30 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -4121,6 +4822,30 @@
       "references": [
         "OWASP Error Handling Cheat Sheet",
         "OWASP Logging Cheat Sheet"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Redact query values and use a safe synthetic validation error; do not use injection payloads."
+        ],
+        "my": [
+          "Query value များဖျောက်ပြီး safe synthetic validation error သုံးပါ၊ injection payload မသုံးပါနှင့်။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Keep generic client errors while preserving controlled server diagnostics, alerting, and retention rules."
+        ],
+        "my": [
+          "Client ထံ generic error ပြန်ပြီး controlled server diagnostics၊ alerting၊ retention rule များကို ထိန်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "db-error-mysql",
+        "db-error-postgres",
+        "db-error-sql-syntax"
       ]
     },
     {
@@ -4254,6 +4979,29 @@
       "references": [
         "OWASP Secrets Management Cheat Sheet",
         "OWASP DOM-based XSS Prevention Cheat Sheet"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the asset is public and classify the observed string/sink as secret, public configuration, or false positive."
+        ],
+        "my": [
+          "Asset သည် public ဖြစ်ကြောင်းနှင့် string/sink သည် secret၊ public config သို့မဟုတ် false positive ဘာလဲ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Rotate exposed credentials and purge old bundles before declaring the finding resolved."
+        ],
+        "my": [
+          "Finding ပြေလည်ပြီမပြောမီ exposed credential များ rotate လုပ်ပြီး bundle အဟောင်းများ purge လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "dom-xss-sink-clues",
+        "source-map-reachable"
       ]
     },
     {
@@ -4387,6 +5135,30 @@
       "references": [
         "OWASP Secrets Management Cheat Sheet",
         "OWASP DOM-based XSS Prevention Cheat Sheet"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the asset is public and classify the observed string/sink as secret, public configuration, or false positive."
+        ],
+        "my": [
+          "Asset သည် public ဖြစ်ကြောင်းနှင့် string/sink သည် secret၊ public config သို့မဟုတ် false positive ဘာလဲ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Rotate exposed credentials and purge old bundles before declaring the finding resolved."
+        ],
+        "my": [
+          "Finding ပြေလည်ပြီမပြောမီ exposed credential များ rotate လုပ်ပြီး bundle အဟောင်းများ purge လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "client-secret-pattern-",
+        "dom-xss-sink-clues",
+        "source-map-reachable"
       ]
     },
     {
@@ -4520,6 +5292,29 @@
       "references": [
         "OWASP Secrets Management Cheat Sheet",
         "OWASP DOM-based XSS Prevention Cheat Sheet"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the asset is public and classify the observed string/sink as secret, public configuration, or false positive."
+        ],
+        "my": [
+          "Asset သည် public ဖြစ်ကြောင်းနှင့် string/sink သည် secret၊ public config သို့မဟုတ် false positive ဘာလဲ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Rotate exposed credentials and purge old bundles before declaring the finding resolved."
+        ],
+        "my": [
+          "Finding ပြေလည်ပြီမပြောမီ exposed credential များ rotate လုပ်ပြီး bundle အဟောင်းများ purge လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "client-secret-pattern-",
+        "dom-xss-sink-clues"
       ]
     },
     {
@@ -4653,6 +5448,29 @@
       "references": [
         "OWASP Secrets Management Cheat Sheet",
         "OWASP DOM-based XSS Prevention Cheat Sheet"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the asset is public and classify the observed string/sink as secret, public configuration, or false positive."
+        ],
+        "my": [
+          "Asset သည် public ဖြစ်ကြောင်းနှင့် string/sink သည် secret၊ public config သို့မဟုတ် false positive ဘာလဲ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Rotate exposed credentials and purge old bundles before declaring the finding resolved."
+        ],
+        "my": [
+          "Finding ပြေလည်ပြီမပြောမီ exposed credential များ rotate လုပ်ပြီး bundle အဟောင်းများ purge လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "client-secret-pattern-",
+        "source-map-reachable"
       ]
     },
     {
@@ -4786,6 +5604,30 @@
       "references": [
         "OWASP Secrets Management Cheat Sheet",
         "OWASP DOM-based XSS Prevention Cheat Sheet"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the asset is public and classify the observed string/sink as secret, public configuration, or false positive."
+        ],
+        "my": [
+          "Asset သည် public ဖြစ်ကြောင်းနှင့် string/sink သည် secret၊ public config သို့မဟုတ် false positive ဘာလဲ ခွဲခြားပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Rotate exposed credentials and purge old bundles before declaring the finding resolved."
+        ],
+        "my": [
+          "Finding ပြေလည်ပြီမပြောမီ exposed credential များ rotate လုပ်ပြီး bundle အဟောင်းများ purge လုပ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "client-secret-pattern-",
+        "dom-xss-sink-clues",
+        "source-map-reachable"
       ]
     },
     {
@@ -4919,6 +5761,29 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "https-not-enforced"
       ]
     },
     {
@@ -5052,6 +5917,30 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "https-not-enforced",
+        "tls-expiring"
       ]
     },
     {
@@ -5185,6 +6074,30 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "https-not-enforced",
+        "tls-expiring"
       ]
     },
     {
@@ -5318,6 +6231,30 @@
       "references": [
         "OWASP Transport Layer Security Cheat Sheet",
         "MDN HTTPS"
+      ],
+      "severity": "medium",
+      "priority": "P1",
+      "changeRisk": "medium",
+      "prerequisites": {
+        "en": [
+          "Confirm DNS, proxy/CDN, certificate chain, renewal ownership, and canonical URL behavior."
+        ],
+        "my": [
+          "DNS၊ proxy/CDN၊ certificate chain၊ renewal owner နှင့် canonical URL behavior ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Schedule changes outside peak traffic when certificate, redirect, or edge behavior may affect availability."
+        ],
+        "my": [
+          "Certificate၊ redirect သို့မဟုတ် edge behavior က availability ထိခိုက်နိုင်လျှင် peak traffic မဟုတ်ချိန်တွင် ပြောင်းပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "hsts-missing",
+        "https-not-enforced",
+        "tls-expiring"
       ]
     },
     {
@@ -5451,6 +6388,28 @@
       "references": [
         "OWASP Application Security Verification Standard",
         "OWASP Testing Guide"
+      ],
+      "severity": "info",
+      "priority": "P2",
+      "changeRisk": "low",
+      "prerequisites": {
+        "en": [
+          "Confirm the evidence, affected route, environment, build, and authoritative configuration owner."
+        ],
+        "my": [
+          "Evidence၊ affected route၊ environment၊ build နှင့် authoritative config owner ကို အတည်ပြုပါ။"
+        ]
+      },
+      "implementationNotes": {
+        "en": [
+          "Treat this as a review cue until the effective behavior is reproduced safely."
+        ],
+        "my": [
+          "Effective behavior ကို လုံခြုံစွာ reproduce မလုပ်မချင်း review cue အဖြစ်သာ သတ်မှတ်ပါ။"
+        ]
+      },
+      "relatedFindings": [
+        "manual-context-review"
       ]
     }
   ],
@@ -5462,5 +6421,5 @@
     "Apache",
     "Supabase"
   ],
-  "version": "1.2"
+  "version": "1.3"
 }
