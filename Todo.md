@@ -112,7 +112,7 @@ For each item, first check the current code and tests, decide whether the work i
 
 - [=] Linux `.deb` package, Windows `.exe` CI artifact, and tag-based GitHub Release exist.
 - [~] Verify install/uninstall, upgrade, application data retention, and dependency behavior on clean supported systems. Added documented v1.0 verification procedure and data-retention expectations in `docs/release-verification.md`, `docs/user-guide.md`, and `docs/history-and-reports.md`; actual clean VM/PC execution and recorded results remain a manual release task outside this environment.
-- [=] Decide whether users need a Windows installer in addition to the portable executable; add only after upgrade/uninstall behavior is defined. Current v1.1.3 release ships portable `.exe` (documented); conventional installer deferred until behavior is defined and verified.
+- [=] Decide whether users need a Windows installer in addition to the portable executable; add only after upgrade/uninstall behavior is defined. Current v1.1.4 release ships portable `.exe` (documented); conventional installer deferred until behavior is defined and verified.
 - [~] Add signing/provenance and release checks if required by the distribution threat model. Not configured; documented in `docs/release-verification.md` for follow-up if required.
 - [-] macOS package/auto-updater — defer until macOS is an explicitly supported target and signing/notarization can be maintained.
 

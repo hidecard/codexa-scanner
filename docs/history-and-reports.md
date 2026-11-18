@@ -43,4 +43,4 @@ If history is unavailable, scanning remains usable but the History/Dashboard vie
 
 ## Install, upgrade, and uninstall data behavior
 
-Local history is stored outside the application install directory in the OS user configuration directory (`CodexaScanner/history.sqlite`). Replacing/upgrading binaries should not remove this user-data path, but uninstall/remove behavior can differ by platform and packaging (for example, package remove vs purge, or deleting a portable executable). Verify history retention on clean systems for v1.1.3 `.deb` and `.exe` releases; see [Release & Installer Verification (v1.1.3)](release-verification.md).
+Local history is stored outside the application install directory in the OS user configuration directory (`CodexaScanner/history.sqlite`). Replacing/upgrading binaries should not remove this user-data path, but uninstall/remove behavior can differ by platform and packaging (for example, package remove vs purge, or deleting a portable executable). Verify history retention on clean systems for v1.1.4 `.deb`, `.exe`, and `.dmg` releases; see [Release & Installer Verification (v1.1.4)](release-verification.md).

@@ -51,22 +51,32 @@ go mod tidy
 wails build -platform linux/amd64
 ```
 
+On macOS, Wails builds an application bundle. Build the architecture matching the Mac, or use the release DMG files:
+
+```sh
+wails build -platform darwin/arm64   # Apple Silicon
+wails build -platform darwin/amd64   # Intel
+```
+
 For development, run `wails dev` from the repository root after installing dependencies. Wails CLI installation instructions are available in the official Wails documentation.
 
 ## Documentation
 
 Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md). The complete documentation index is in [`docs/README.md`](docs/README.md).
 
-## CI artifacts and releases (v1.0)
+## CI artifacts and releases (v1.1.4)
 
 GitHub Actions (`.github/workflows/build.yml`) runs on pushes to `main`, pull requests, and version tags (`v*`).
 
 - **Permissions:** least-privilege by default (`contents: read`); only the tag-release job is granted `contents: write`.
-- **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.0.0_amd64.deb`.
-- **Windows (`windows-latest`):** builds portable `CodexaScanner.exe` and runs `go test ./...` and `go vet ./...` (`-race` is not supported on `windows/386` toolchains; Linux CI provides race coverage).
-- **Release (tag `v1.0.0` / `v*`):** attaches `.deb` and `.exe` artifacts to a GitHub Release with generated notes.
+- **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.1.4_amd64.deb`.
+- **Windows (`windows-latest`):** builds portable `CodexaScanner.exe` and runs `go test ./...` and `go vet ./...`.
+- **macOS:** builds both Intel (`amd64`, `macos-13`) and Apple Silicon (`arm64`, `macos-14`) application bundles, then packages `CodexaScanner-amd64.dmg` and `CodexaScanner-arm64.dmg`.
+- **Release (tag `v1.1.4` / `v*`):** attaches `.deb`, `.exe`, and both `.dmg` assets to a GitHub Release with generated notes.
 
-Frontend dependencies are pinned to exact versions with a committed lockfile to reduce build drift. Download build artifacts from the Actions run or the GitHub Release assets. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
+The macOS DMGs are currently unsigned and not notarized. On a clean Mac, open the DMG, drag **CodexaScanner.app** to **Applications**, then use **Open** from the Finder context menu the first time if Gatekeeper blocks the unsigned app.
+
+Frontend dependencies are pinned with a committed lockfile to reduce build drift. Download build artifacts from the Actions run or the GitHub Release assets. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
 
 ## Repository topics
 
