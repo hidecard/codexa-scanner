@@ -63,13 +63,16 @@ func (s *StackFix) UnmarshalJSON(data []byte) error {
 }
 
 type RemediationEntry struct {
-	ID             string              `json:"id"`
-	Title          BilingualText       `json:"title"`
-	Mechanism      BilingualText       `json:"mechanism"`
-	CommonMistakes BilingualTextList   `json:"commonMistakes"`
-	AttackScenario BilingualText       `json:"attackScenario"`
-	WhereToFix     BilingualText       `json:"whereToFix"`
-	Stacks         map[string]StackFix `json:"stacks"`
+	ID                 string              `json:"id"`
+	Title              BilingualText       `json:"title"`
+	Mechanism          BilingualText       `json:"mechanism"`
+	CommonMistakes     BilingualTextList   `json:"commonMistakes"`
+	AttackScenario     BilingualText       `json:"attackScenario"`
+	AttackSteps        BilingualTextList   `json:"attackSteps"`
+	WhereToFix         BilingualText       `json:"whereToFix"`
+	VerificationSteps  BilingualTextList   `json:"verificationSteps"`
+	FalsePositiveNotes BilingualText       `json:"falsePositiveNotes"`
+	Stacks             map[string]StackFix `json:"stacks"`
 }
 
 type BilingualTextList struct {

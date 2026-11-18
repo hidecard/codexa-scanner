@@ -1454,6 +1454,8 @@ ${rows || '<p>No results.</p>'}
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Common developer mistakes</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{guideList(g,'commonMistakes').map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>
                   <section><h4 className="font-semibold text-emerald-300">Attack scenario</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'attackScenario')}</p></section>
+                  <section><h4 className="font-semibold text-emerald-300">Step-by-step safe walkthrough</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'attackSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
+                  <section><h4 className="font-semibold text-amber-300">False-positive / scope note</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'falsePositiveNotes')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Where to fix</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'whereToFix')}</p></section>
                   <section>
                     <div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold text-emerald-300">Stack-specific fix</h4><span className="text-[11px] text-slate-500">Detected: {detectedTechStack}</span></div>
@@ -1468,6 +1470,7 @@ ${rows || '<p>No results.</p>'}
                       </div>
                     ) : <p className="mt-2 text-xs text-slate-400">No stack-specific snippet available for this stack.</p>}
                   </section>
+                  <section><h4 className="font-semibold text-emerald-300">Verification checklist</h4><ol className="mt-1 list-decimal pl-5 text-slate-300">{guideList(g,'verificationSteps').map((x:string,i:number)=><li key={i}>{x}</li>)}</ol></section>
                 </div>
               )}
             </div>
