@@ -96,7 +96,7 @@ jobs:
             runner: macos-13
             wails_platform: darwin/amd64
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
             wails_platform: darwin/arm64
     steps:
       - uses: actions/checkout@v4

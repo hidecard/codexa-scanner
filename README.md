@@ -71,7 +71,7 @@ GitHub Actions (`.github/workflows/build.yml`) runs on pushes to `main`, pull re
 - **Permissions:** least-privilege by default (`contents: read`); only the tag-release job is granted `contents: write`.
 - **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.1.4_amd64.deb`.
 - **Windows (`windows-latest`):** builds portable `CodexaScanner.exe` and runs `go test ./...` and `go vet ./...`.
-- **macOS:** builds both Intel (`amd64`, `macos-13`) and Apple Silicon (`arm64`, `macos-14`) application bundles, then packages `CodexaScanner-amd64.dmg` and `CodexaScanner-arm64.dmg`.
+- **macOS:** builds both Intel (`amd64`, `macos-13`) and Apple Silicon (`arm64`, `macos-15`) application bundles, then packages `CodexaScanner-amd64.dmg` and `CodexaScanner-arm64.dmg`.
 - **Release (tag `v1.1.4` / `v*`):** attaches `.deb`, `.exe`, and both `.dmg` assets to a GitHub Release with generated notes.
 
 The macOS DMGs are currently unsigned and not notarized. On a clean Mac, open the DMG, drag **CodexaScanner.app** to **Applications**, then use **Open** from the Finder context menu the first time if Gatekeeper blocks the unsigned app.
