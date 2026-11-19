@@ -199,6 +199,14 @@ func TestGradeFindingsUsesSeverityAndCapsScore(t *testing.T) {
 	}
 }
 
+func TestFilterBulkTargetsAppliesScopeAndExclusions(t *testing.T) {
+	input := "https://app.example.com\nhttps://admin.example.com\nhttps://other.test\nhttps://app.example.com"
+	got := filterBulkTargets(input, "*.example.com\n# comments are ignored", "admin.example.com")
+	if len(got) != 1 || got[0] != "https://app.example.com" {
+		t.Fatalf("unexpected filtered targets: %#v", got)
+	}
+}
+
 func TestAnalyzeURLRejectsUntrustedTLSCertificate(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -404,7 +412,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10, nil, "")
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10, nil, "", "", "")
 	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
 		t.Fatalf("expected private target policy error, got %+v", results)
 	}
@@ -412,7 +420,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 		t.Fatalf("request reached private target without opt-in (%d requests)", got)
 	}
 
-	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10, nil, "")
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10, nil, "", "", "")
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
@@ -434,7 +442,7 @@ func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testi
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10, nil, "")
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10, nil, "", "", "")
 	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
 		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
 	}

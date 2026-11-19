@@ -40,25 +40,25 @@ import (
 // ==========================================
 
 type AdvisoryCVE struct {
-	CVE             string   `json:"cve"`
-	Title           string   `json:"title"`
-	AffectedVersions string  `json:"affectedVersions"`
-	FixedVersion    string   `json:"fixedVersion"`
-	Severity        string   `json:"severity"`
-	Description     string   `json:"description"`
-	References      []string `json:"references"`
+	CVE              string   `json:"cve"`
+	Title            string   `json:"title"`
+	AffectedVersions string   `json:"affectedVersions"`
+	FixedVersion     string   `json:"fixedVersion"`
+	Severity         string   `json:"severity"`
+	Description      string   `json:"description"`
+	References       []string `json:"references"`
 }
 
 type AdvisoryEntry struct {
-	Product string         `json:"product"`
-	CVEs    []AdvisoryCVE  `json:"cves"`
+	Product string        `json:"product"`
+	CVEs    []AdvisoryCVE `json:"cves"`
 }
 
 type AdvisoryMatch struct {
-	Product       string        `json:"product"`
-	DetectedVersion string      `json:"detectedVersion,omitempty"`
-	Matches       []AdvisoryCVE `json:"matches"`
-	Source        string        `json:"source"` // "banner", "server-header", "powered-by", "technology", "tls"
+	Product         string        `json:"product"`
+	DetectedVersion string        `json:"detectedVersion,omitempty"`
+	Matches         []AdvisoryCVE `json:"matches"`
+	Source          string        `json:"source"` // "banner", "server-header", "powered-by", "technology", "tls"
 }
 
 var (
@@ -317,7 +317,7 @@ func isVersionAffected(detectedVersion, affectedRange, fixedVersion string) bool
 	}
 	// affectedRange format: "< 9.8p1" or "< 3.0.16, < 3.1.6"
 	// fixedVersion format: "9.8p1" or "3.0.16 / 3.1.6"
-	
+
 	// Check against fixed versions (more reliable)
 	fixedVersions := strings.Split(fixedVersion, "/")
 	for _, fv := range fixedVersions {
@@ -326,7 +326,7 @@ func isVersionAffected(detectedVersion, affectedRange, fixedVersion string) bool
 			return true
 		}
 	}
-	
+
 	// Also check affected range
 	ranges := strings.Split(affectedRange, ",")
 	for _, r := range ranges {
@@ -463,10 +463,10 @@ type App struct {
 	nextScanID uint64
 	historyDB  *sql.DB
 
-	rateMu      sync.Mutex
-	scanPaused  bool
-	pauseCond   *sync.Cond
-	activeBulk  bool
+	rateMu     sync.Mutex
+	scanPaused bool
+	pauseCond  *sync.Cond
+	activeBulk bool
 }
 
 type ScanRateControl struct {
@@ -518,6 +518,7 @@ const (
 	maxScanTimeout     = 30_000
 	scanResolveTimeout = 5 * time.Second
 )
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	configDir, err := os.UserConfigDir()
@@ -871,20 +872,20 @@ func (a *App) StopPortScan() {
 
 // CIDRSweepResult contains results for a /24 CIDR port sweep.
 type CIDRSweepResult struct {
-	CIDR      string               `json:"cidr"`
-	Hosts     []CIDRHostResult     `json:"hosts"`
-	Error     string               `json:"error,omitempty"`
-	Scanned   int                  `json:"scanned"`
-	LiveHosts int                  `json:"liveHosts"`
+	CIDR      string           `json:"cidr"`
+	Hosts     []CIDRHostResult `json:"hosts"`
+	Error     string           `json:"error,omitempty"`
+	Scanned   int              `json:"scanned"`
+	LiveHosts int              `json:"liveHosts"`
 }
 
 // CIDRHostResult contains port scan results for a single host in a CIDR sweep.
 type CIDRHostResult struct {
-	IP              string           `json:"ip"`
-	Hostname        string           `json:"hostname,omitempty"`
-	Ports           []PortFinding    `json:"ports,omitempty"`
-	Error           string           `json:"error,omitempty"`
-	AdvisoryMatches []AdvisoryMatch  `json:"advisoryMatches,omitempty"`
+	IP              string          `json:"ip"`
+	Hostname        string          `json:"hostname,omitempty"`
+	Ports           []PortFinding   `json:"ports,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	AdvisoryMatches []AdvisoryMatch `json:"advisoryMatches,omitempty"`
 }
 
 // internal type for collecting sweep results
@@ -1058,27 +1059,27 @@ func (a *App) runCIDRSweep(scan *portScan, cidr string, startPort, endPort, work
 					}
 				}
 
-resultsMu.Lock()
-			// Collect advisory matches from banners
-			var advisoryMatches []AdvisoryMatch
-			for _, pf := range hostPorts {
-				if pf.Banner != "" {
-					matches := collectAdvisoryMatches(pf.Banner, "", "", nil, "", "")
-					advisoryMatches = append(advisoryMatches, matches...)
+				resultsMu.Lock()
+				// Collect advisory matches from banners
+				var advisoryMatches []AdvisoryMatch
+				for _, pf := range hostPorts {
+					if pf.Banner != "" {
+						matches := collectAdvisoryMatches(pf.Banner, "", "", nil, "", "")
+						advisoryMatches = append(advisoryMatches, matches...)
+					}
 				}
-			}
-			// Deduplicate advisory matches
-			seenAdv := make(map[string]bool)
-			var uniqueAdv []AdvisoryMatch
-			for _, am := range advisoryMatches {
-				key := am.Product + ":" + am.DetectedVersion + ":" + am.Source
-				if !seenAdv[key] {
-					seenAdv[key] = true
-					uniqueAdv = append(uniqueAdv, am)
+				// Deduplicate advisory matches
+				seenAdv := make(map[string]bool)
+				var uniqueAdv []AdvisoryMatch
+				for _, am := range advisoryMatches {
+					key := am.Product + ":" + am.DetectedVersion + ":" + am.Source
+					if !seenAdv[key] {
+						seenAdv[key] = true
+						uniqueAdv = append(uniqueAdv, am)
+					}
 				}
-			}
-			results = append(results, cidrHostResult{ip: ipStr, hostname: hostname, ports: hostPorts, advisoryMatches: uniqueAdv})
-			resultsMu.Unlock()
+				results = append(results, cidrHostResult{ip: ipStr, hostname: hostname, ports: hostPorts, advisoryMatches: uniqueAdv})
+				resultsMu.Unlock()
 			}
 		}()
 	}
@@ -1251,10 +1252,10 @@ const (
 	reflectedProbeMarker          = "codexa_probe_123"
 )
 
-
-
 func (a *App) PauseScans() {
-	if a == nil { return }
+	if a == nil {
+		return
+	}
 	a.rateMu.Lock()
 	a.scanPaused = true
 	a.rateMu.Unlock()
@@ -1262,10 +1263,14 @@ func (a *App) PauseScans() {
 }
 
 func (a *App) ResumeScans() {
-	if a == nil { return }
+	if a == nil {
+		return
+	}
 	a.rateMu.Lock()
 	a.scanPaused = false
-	if a.pauseCond != nil { a.pauseCond.Broadcast() }
+	if a.pauseCond != nil {
+		a.pauseCond.Broadcast()
+	}
 	a.rateMu.Unlock()
 	a.emitScanControl("running")
 }
@@ -1277,19 +1282,25 @@ func (a *App) emitScanControl(state string) {
 }
 
 func (a *App) IsScansPaused() bool {
-	if a == nil { return false }
+	if a == nil {
+		return false
+	}
 	a.rateMu.Lock()
 	defer a.rateMu.Unlock()
 	return a.scanPaused
 }
 
 func (a *App) waitIfPaused(ctx context.Context) bool {
-	if a == nil { return true }
+	if a == nil {
+		return true
+	}
 	for {
 		a.rateMu.Lock()
 		paused := a.scanPaused
 		a.rateMu.Unlock()
-		if !paused { return true }
+		if !paused {
+			return true
+		}
 		select {
 		case <-ctx.Done():
 			return false
@@ -1300,13 +1311,17 @@ func (a *App) waitIfPaused(ctx context.Context) bool {
 
 func (a *App) waitForRateSlot(ctx context.Context, last time.Time, rc ScanRateControl) (time.Time, bool) {
 	rc = rc.normalized()
-	if !a.waitIfPaused(ctx) { return last, false }
+	if !a.waitIfPaused(ctx) {
+		return last, false
+	}
 	delay := time.Duration(0)
 	if rc.RPS > 0 {
 		interval := time.Second / time.Duration(rc.RPS)
 		if !last.IsZero() {
 			next := last.Add(interval)
-			if now := time.Now(); next.After(now) { delay = next.Sub(now) }
+			if now := time.Now(); next.After(now) {
+				delay = next.Sub(now)
+			}
 		}
 	}
 	if rc.JitterMs > 0 {
@@ -1321,23 +1336,93 @@ func (a *App) waitForRateSlot(ctx context.Context, last time.Time, rc ScanRateCo
 		case <-t.C:
 		}
 	}
-	if !a.waitIfPaused(ctx) { return time.Now(), false }
+	if !a.waitIfPaused(ctx) {
+		return time.Now(), false
+	}
 	return time.Now(), true
 }
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, customHeaders map[string]string, proxyURL string) []BulkHeaderResult {
+func parseTargetRules(raw string) []string {
+	var rules []string
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 1024), 64*1024)
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(strings.SplitN(scanner.Text(), "#", 2)[0])
+		if line == "" {
+			continue
+		}
+		if u, err := url.Parse(line); err == nil && u.Hostname() != "" {
+			line = u.Hostname()
+		}
+		line = strings.Trim(strings.ToLower(line), ".")
+		if line == "" || strings.ContainsAny(line, "/\\\r\n") || seen[line] {
+			continue
+		}
+		seen[line] = true
+		rules = append(rules, line)
+	}
+	return rules
+}
+
+func targetMatchesRule(rawTarget string, rule string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawTarget))
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.Trim(strings.ToLower(u.Hostname()), ".")
+	rule = strings.Trim(strings.ToLower(rule), ".")
+	if strings.HasPrefix(rule, "*.") {
+		return strings.HasSuffix(host, rule[1:]) && host != strings.TrimPrefix(rule, "*.")
+	}
+	return host == rule
+}
+
+func filterBulkTargets(rawInput, scopeInput, excludeInput string) []string {
+	scopeRules := parseTargetRules(scopeInput)
+	excludeRules := parseTargetRules(excludeInput)
 	var urls []string
 	scanner := bufio.NewScanner(strings.NewReader(rawInput))
 	scanner.Buffer(make([]byte, 1024), 64*1024)
+	seen := map[string]bool{}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			if len(urls) >= 100 {
+		if line == "" || seen[line] {
+			continue
+		}
+		if len(scopeRules) > 0 {
+			inScope := false
+			for _, rule := range scopeRules {
+				if targetMatchesRule(line, rule) {
+					inScope = true
+					break
+				}
+			}
+			if !inScope {
+				continue
+			}
+		}
+		excluded := false
+		for _, rule := range excludeRules {
+			if targetMatchesRule(line, rule) {
+				excluded = true
 				break
 			}
-			urls = append(urls, line)
+		}
+		if excluded {
+			continue
+		}
+		seen[line] = true
+		urls = append(urls, line)
+		if len(urls) >= 100 {
+			break
 		}
 	}
+	return urls
+}
+
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, customHeaders map[string]string, proxyURL string, scopeInput string, excludeInput string) []BulkHeaderResult {
+	urls := filterBulkTargets(rawInput, scopeInput, excludeInput)
 
 	if len(urls) == 0 {
 		return nil
@@ -1348,8 +1433,12 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	if concurrency > 20 {
 		concurrency = 20
 	}
-	if requestDelayMs < 0 { requestDelayMs = 0 }
-	if requestDelayMs > 5000 { requestDelayMs = 5000 }
+	if requestDelayMs < 0 {
+		requestDelayMs = 0
+	}
+	if requestDelayMs > 5000 {
+		requestDelayMs = 5000
+	}
 	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
 	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds, CustomHeaders: customHeaders, ProxyURL: proxyURL})
 
@@ -1366,22 +1455,28 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	ctx := a.ctx
-	if ctx == nil { ctx = context.Background() }
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var gateMu sync.Mutex
 	var last time.Time
 	nextSlot := func() bool {
-		gateMu.Lock(); defer gateMu.Unlock()
+		gateMu.Lock()
+		defer gateMu.Unlock()
 		t, ok := a.waitForRateSlot(ctx, last, rate)
 		last = t
 		return ok
 	}
 
 	for idx, rawURL := range urls {
-		if ctx.Err() != nil { break }
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int, target string) {
-			defer wg.Done(); defer func() { <-sem }()
+			defer wg.Done()
+			defer func() { <-sem }()
 			if !nextSlot() {
 				inputURL := analysisURLForDisplay(target)
 				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: "Scan paused/stopped before request"}
@@ -2459,14 +2554,14 @@ type ReportSeverityBreakdown struct {
 
 // ReportSummary provides an executive/technical overview derived from report data.
 type ReportSummary struct {
-	Title             string                  `json:"title"`
-	Overview          string                  `json:"overview"`
-	Targets           int                     `json:"targets,omitempty"`
-	Errors            int                     `json:"errors,omitempty"`
-	AverageRiskScore  int                     `json:"averageRiskScore,omitempty"`
+	Title             string                   `json:"title"`
+	Overview          string                   `json:"overview"`
+	Targets           int                      `json:"targets,omitempty"`
+	Errors            int                      `json:"errors,omitempty"`
+	AverageRiskScore  int                      `json:"averageRiskScore,omitempty"`
 	SeverityBreakdown *ReportSeverityBreakdown `json:"severityBreakdown,omitempty"`
-	TopFindings       []string                `json:"topFindings,omitempty"`
-	Recommendations   []string                `json:"recommendations,omitempty"`
+	TopFindings       []string                 `json:"topFindings,omitempty"`
+	Recommendations   []string                 `json:"recommendations,omitempty"`
 }
 
 // ScanReportEnvelope is the shared, versioned report/export model used by JSON,
@@ -2651,10 +2746,10 @@ func deriveHistorySummary(data any) *ReportSummary {
 		top = top[:5]
 	}
 	return &ReportSummary{
-		Title:        "Scan History Report",
-		Overview:     "Shared, versioned export of locally stored scan history. Contains bounded, redacted records from the History view; review before sharing.",
-		Targets:      len(targets),
-		TopFindings:  top,
+		Title:           "Scan History Report",
+		Overview:        "Shared, versioned export of locally stored scan history. Contains bounded, redacted records from the History view; review before sharing.",
+		Targets:         len(targets),
+		TopFindings:     top,
 		Recommendations: []string{"Review exported history for sensitive targets or internal context before sharing externally."},
 	}
 }

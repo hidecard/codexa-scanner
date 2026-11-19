@@ -60,6 +60,10 @@ export default function App() {
 
   // --- Bulk HTTP Analyzer States ---
   const [bulkUrls, setBulkUrls] = useState('https://example.com\nhttps://google.com\nhttps://github.com');
+  const [scopeFileText, setScopeFileText] = useState('');
+  const [scopeFileName, setScopeFileName] = useState('');
+  const [excludeFileText, setExcludeFileText] = useState('');
+  const [excludeFileName, setExcludeFileName] = useState('');
   const [httpThreads, setHttpThreads] = useState(10);
   const [httpDelayMs, setHttpDelayMs] = useState(0);
   const [allowPrivateHTTPTargets, setAllowPrivateHTTPTargets] = useState(false);
@@ -118,6 +122,11 @@ export default function App() {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error) return error;
     return fallback;
+  };
+  const loadRuleFile = async (file: File | undefined, setText: (value: string) => void, setName: (value: string) => void) => {
+    if (!file) return;
+    setText(await file.text());
+    setName(file.name);
   };
 
   const parseCustomHeaders = (input: string): { [key: string]: string } => {
@@ -313,7 +322,7 @@ export default function App() {
     setHttpError('');
     try {
       const headers = parseCustomHeaders(customHeaders);
-      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs), Number(httpRps), Number(httpJitterMs), requestUserAgent, Number(requestTimeout), headers, proxyURL);
+      const res = await AnalyzeBulkURLs(bulkUrls, Number(httpThreads), allowPrivateForBatch, Number(httpDelayMs), Number(httpRps), Number(httpJitterMs), requestUserAgent, Number(requestTimeout), headers, proxyURL, scopeFileText, excludeFileText);
       setHttpResults(res || []);
     } catch (error) {
       setHttpError(errorMessage(error, 'Unable to analyze the URLs. Check the inputs and try again.'));
@@ -1234,6 +1243,21 @@ ${rows || '<p>No results.</p>'}
               placeholder="https://your-authorized-site.example&#10;http://your-lab-host.example"
               className="min-h-28 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs font-mono outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
             />
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-400">
+                Scope file <span className="text-slate-600">(scope.txt, optional)</span>
+                <input type="file" accept=".txt,text/plain" disabled={isAnalyzing} onChange={(e) => void loadRuleFile(e.target.files?.[0], setScopeFileText, setScopeFileName)} className="mt-2 block w-full text-[11px] text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-800 file:px-2 file:py-1 file:text-[11px] file:text-slate-200" />
+                <span className="mt-2 block break-all text-[11px] text-emerald-400">{scopeFileName || 'No scope file loaded'}</span>
+                <span className="mt-1 block text-[11px] text-slate-600">Only matching hostnames are scanned. Supports exact hosts and *.example.com.</span>
+              </label>
+              <label className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-400">
+                Exclusion file <span className="text-slate-600">(exclude.txt, optional)</span>
+                <input type="file" accept=".txt,text/plain" disabled={isAnalyzing} onChange={(e) => void loadRuleFile(e.target.files?.[0], setExcludeFileText, setExcludeFileName)} className="mt-2 block w-full text-[11px] text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-800 file:px-2 file:py-1 file:text-[11px] file:text-slate-200" />
+                <span className="mt-2 block break-all text-[11px] text-amber-300">{excludeFileName || 'No exclusion file loaded'}</span>
+                <span className="mt-1 block text-[11px] text-slate-600">Matching hosts are skipped. Blank lines and # comments are ignored.</span>
+              </label>
+            </div>
 
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-xs leading-relaxed text-slate-300">
               <input
