@@ -30,6 +30,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
 - Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. History records can be selected across targets and scan types for consolidated engagement JSON/PDF reports. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
 - Web Audit: bounded HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/mixed-content and CSP diagnostics, passive CORS/JWT posture clues (including origin reflection), sampled DB-error disclosure, `security.txt`/`robots.txt` inspectors, and bounded client-side exposure audit (first-party JS secret-pattern clues with redacted previews, source-map reachability HEAD checks, API/BaaS endpoint extraction, DOM sink clues, harmless reflected-parameter indicator) with JSON/HTML/Markdown/PDF exports, request delay control, and per-URL snapshot diff.
+- Headless Web Audit CLI (`audit --url ... --fail-on high --json report.json`) reuses target validation and bounded checks, writes a redacted versioned JSON report, and returns CI-friendly exit codes; private/loopback targets require an explicit `--allow-private` flag.
 - Path Fuzzer: HEAD-only bounded path checks with framework/env/API presets and request delay control.
 - Shared, versioned report model with bounded redaction (credentials/sensitive URL query-fragments/sensitive keys) for persistence, individual exports, history exports, and consolidated engagement reports.
 - Cross-platform desktop UI powered by Wails.
@@ -62,7 +63,7 @@ For development, run `wails dev` from the repository root after installing depen
 
 ## Documentation
 
-Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md). The complete documentation index is in [`docs/README.md`](docs/README.md).
+Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Headless CLI](docs/cli.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md). The complete documentation index is in [`docs/README.md`](docs/README.md).
 
 ## CI artifacts and releases (v1.1.4)
 
