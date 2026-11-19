@@ -18,7 +18,8 @@ Use only URLs that are explicitly approved. Enter one HTTP or HTTPS URL per line
 6. Expand **Resource inspectors** to review `/.well-known/security.txt` and `/robots.txt`. `robots.txt` is discovery guidance, not a security control.
 7. Expand **Client-side exposure audit (bounded passive)** to review script scan counts, reflected-parameter probe result (when applicable), redacted secret-pattern clues, source-map reachability clues, extracted API/BaaS endpoint clues, and DOM sink clues with script URL/line context.
 8. Review **Passive findings** for header/cookie/TLS/mixed-content issues, CSP directive diagnostics, CORS/JWT posture clues (including origin reflection clue), database-error disclosure clues, and client-side exposure findings. Each finding includes evidence and remediation guidance. Secret/token values and JWT token values are not shown in clear text (redacted/metadata-only where applicable).
-9. Export reports only after reviewing for sensitive URLs, headers, cookies, inspector bodies, client-side clues, and internal hostnames. Supported exports: JSON (versioned/redacted envelope), HTML, Markdown, PDF (branded/shared report model).
+9. Where applicable, expand **Safe CLI verification commands** and copy a suggested read-only `curl -I`, `openssl s_client`, or `dig` command for manual verification. These commands are suggestions only and are never run by the app. URL credentials, query strings, and fragments are excluded; review the resulting command and authorization scope before running it in a terminal.
+10. Export reports only after reviewing for sensitive URLs, headers, cookies, inspector bodies, client-side clues, and internal hostnames. Supported exports: JSON (versioned/redacted envelope), HTML, Markdown, PDF (branded/shared report model).
 
 ## Redirect, DNS, and probe behavior
 

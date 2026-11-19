@@ -29,6 +29,42 @@ import { main } from '../wailsjs/go/models';
 type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook';
 type GuideLang = 'en' | 'my';
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function verificationCommands(result: main.BulkHeaderResult): { label: string; command: string }[] {
+  let parsed: URL;
+  try {
+    parsed = new URL(result.finalUrl || result.url);
+  } catch {
+    return [];
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return [];
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  // Do not copy credentials or potentially sensitive query/fragment values into a terminal.
+  parsed.username = '';
+  parsed.password = '';
+  parsed.search = '';
+  parsed.hash = '';
+  const safeURL = parsed.toString();
+  const signals = (result.findings || []).map((finding) => `${finding.id} ${finding.title}`).join(' ').toLowerCase();
+  const commands: { label: string; command: string }[] = [];
+  if (result.findings?.length) {
+    commands.push({ label: 'HTTP response headers', command: `curl -sS -I --max-time 10 -- ${shellQuote(safeURL)}` });
+  }
+  if (/tls|certificate|cipher|https/.test(signals) || result.tls) {
+    const connectHost = host.includes(':') ? `[${host}]` : host;
+    const serverName = host.includes(':') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) ? '' : `-servername ${shellQuote(host)} `;
+    commands.push({ label: 'TLS certificate and negotiation', command: `openssl s_client -connect ${shellQuote(`${connectHost}:${port}`)} ${serverName}-brief </dev/null` });
+  }
+  if (/dns|spf|dmarc|dkim|cname|subdomain/.test(signals)) {
+    commands.push({ label: 'DNS records', command: `dig ${shellQuote(host)} A +noall +answer && dig ${shellQuote(host)} TXT +noall +answer` });
+  }
+  return commands;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
@@ -69,6 +105,7 @@ export default function App() {
   const [allowPrivateHTTPTargets, setAllowPrivateHTTPTargets] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [httpResults, setHttpResults] = useState<main.BulkHeaderResult[]>([]);
+  const [copiedVerificationCommand, setCopiedVerificationCommand] = useState('');
 
   // --- Authorized recon modules ---
   const [subdomain, setSubdomain] = useState('example.com');
@@ -1444,6 +1481,33 @@ ${rows || '<p>No results.</p>'}
                       </div>
                     ) : (
                       <p className="text-xs text-emerald-400">No issues found by these passive checks. This is not proof that the site is vulnerability-free.</p>
+                    )}
+
+                    {verificationCommands(res).length > 0 && (
+                      <details className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-slate-300">Safe CLI verification commands (copy only)</summary>
+                        <p className="mt-2 text-[11px] text-slate-500">Read-only diagnostics derived from observed findings. Codexa Scanner does not run these commands; review scope and targets before use.</p>
+                        <div className="mt-2 space-y-2">
+                          {verificationCommands(res).map(({ label, command }) => (
+                            <div key={label} className="rounded border border-slate-800 p-2">
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                                <span>{label}</span>
+                                <button type="button" onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(command);
+                                    setCopiedVerificationCommand(command);
+                                  } catch {
+                                    setCopiedVerificationCommand('');
+                                  }
+                                }} className="rounded border border-slate-700 px-2 py-1 text-emerald-300 hover:bg-slate-800">
+                                  {copiedVerificationCommand === command ? 'Copied' : 'Copy'}
+                                </button>
+                              </div>
+                              <code className="block break-all text-[11px] text-slate-200">{command}</code>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
                     )}
 
                     {(res.securityTxt || res.robotsTxt) && (
