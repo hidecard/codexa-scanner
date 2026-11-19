@@ -22,6 +22,7 @@ func TestParseAuditArgsValidationAndDefaults(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"--url", "https://example.test", "--fail-on", "urgent"},
 		{"--url", "https://example.test", "--timeout", "61"},
+		{"--url", "https://example.test", "--json", "-", "--sarif", "-"},
 	} {
 		if _, err := parseAuditArgs(args, &stderr); err == nil {
 			t.Errorf("parseAuditArgs(%v) unexpectedly succeeded", args)
@@ -69,12 +70,24 @@ func TestRunCLIUsesScopedAuditAndWritesReport(t *testing.T) {
 	defer server.Close()
 
 	path := filepath.Join(t.TempDir(), "audit.json")
+	sarifPath := filepath.Join(t.TempDir(), "audit.sarif")
 	var stdout, stderr bytes.Buffer
-	code := runCLI([]string{"audit", "--url", server.URL, "--allow-private", "--json", path}, &stdout, &stderr)
+	code := runCLI([]string{"audit", "--url", server.URL, "--allow-private", "--json", path, "--sarif", sarifPath}, &stdout, &stderr)
 	if code == 2 {
 		t.Fatalf("audit returned execution/usage error: %s", stderr.String())
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected JSON report: %v", err)
+	}
+	if _, err := os.Stat(sarifPath); err != nil {
+		t.Fatalf("expected SARIF report: %v", err)
+	}
+	var sarifStdout, sarifStderr bytes.Buffer
+	code = runCLI([]string{"audit", "--url", server.URL, "--allow-private", "--sarif", "-"}, &sarifStdout, &sarifStderr)
+	if code == 2 {
+		t.Fatalf("stdout SARIF audit returned error: %s", sarifStderr.String())
+	}
+	if !strings.Contains(sarifStdout.String(), `"version": "2.1.0"`) || strings.Contains(sarifStdout.String(), "Grade ") {
+		t.Fatalf("stdout must contain only SARIF JSON: %s", sarifStdout.String())
 	}
 }

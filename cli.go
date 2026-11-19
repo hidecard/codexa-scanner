@@ -15,6 +15,7 @@ type cliAuditOptions struct {
 	URLs         []string
 	FailOn       string
 	JSONPath     string
+	SARIFPath    string
 	AllowPrivate bool
 	Timeout      int
 }
@@ -37,6 +38,7 @@ func parseAuditArgs(args []string, stderr io.Writer) (cliAuditOptions, error) {
 	set.Var((*stringListFlag)(&options.URLs), "url", "URL to audit (may be repeated; max 100)")
 	set.StringVar(&options.FailOn, "fail-on", options.FailOn, "minimum finding severity for exit code 1: critical, high, medium, low, info")
 	set.StringVar(&options.JSONPath, "json", "", "write a redacted, versioned JSON report to this path (use - for stdout)")
+	set.StringVar(&options.SARIFPath, "sarif", "", "write a SARIF 2.1.0 report to this path (use - for stdout)")
 	set.BoolVar(&options.AllowPrivate, "allow-private", false, "allow private/loopback lab targets for this run")
 	set.IntVar(&options.Timeout, "timeout", options.Timeout, "per-request timeout in seconds (3–60)")
 	if err := set.Parse(args); err != nil {
@@ -56,6 +58,9 @@ func parseAuditArgs(args []string, stderr io.Writer) (cliAuditOptions, error) {
 	}
 	if options.Timeout < 3 || options.Timeout > 60 {
 		return options, errors.New("--timeout must be between 3 and 60 seconds")
+	}
+	if options.JSONPath == "-" && options.SARIFPath == "-" {
+		return options, errors.New("--json and --sarif cannot both write to stdout")
 	}
 	return options, nil
 }
@@ -117,6 +122,26 @@ func writeCLIAuditReport(path string, results []BulkHeaderResult) ([]byte, error
 	return report, nil
 }
 
+func writeCLISARIFReport(path string, results []BulkHeaderResult) ([]byte, error) {
+	report, err := marshalSARIFReport(results)
+	if err != nil {
+		return nil, err
+	}
+	if path == "-" {
+		return report, nil
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("SARIF report path is empty")
+	}
+	if err := os.WriteFile(path, report, 0600); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
 func runAudit(args []string, stdout, stderr io.Writer) int {
 	options, err := parseAuditArgs(args, stderr)
 	if err != nil {
@@ -137,9 +162,24 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	var sarif []byte
+	if options.SARIFPath != "" {
+		sarif, err = writeCLISARIFReport(options.SARIFPath, results)
+		if err != nil {
+			fmt.Fprintf(stderr, "codexa-scanner audit: writing SARIF report: %v\n", err)
+			return 2
+		}
+	}
+	stdoutReport := ""
 	if options.JSONPath == "-" {
+		stdoutReport = "JSON"
+	} else if options.SARIFPath == "-" {
+		stdoutReport = "SARIF"
+		report = sarif
+	}
+	if stdoutReport != "" {
 		if _, err := io.Copy(stdout, bytes.NewReader(report)); err != nil {
-			fmt.Fprintf(stderr, "codexa-scanner audit: writing JSON to stdout: %v\n", err)
+			fmt.Fprintf(stderr, "codexa-scanner audit: writing %s to stdout: %v\n", stdoutReport, err)
 			return 2
 		}
 	} else {
@@ -155,6 +195,9 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 		}
 		if options.JSONPath != "" {
 			fmt.Fprintf(stdout, "JSON report: %s\n", options.JSONPath)
+		}
+		if options.SARIFPath != "" {
+			fmt.Fprintf(stdout, "SARIF report: %s\n", options.SARIFPath)
 		}
 	}
 	for _, result := range results {
@@ -185,7 +228,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		args = args[1:]
 	}
 	if command == "help" || command == "--help" || command == "-h" {
-		fmt.Fprintln(stdout, "Codexa Scanner headless mode\n\nUsage:\n  codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on high] [--json report.json]\n  codexa-scanner audit --help\n\nExit codes: 0 no finding at/above threshold; 1 threshold reached; 2 usage, target, network, or report error.\nPrivate/loopback targets require the explicit --allow-private flag. Commands are bounded Web Audits; only use targets you are authorized to assess.")
+		fmt.Fprintln(stdout, "Codexa Scanner headless mode\n\nUsage:\n  codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on high] [--json report.json] [--sarif report.sarif]\n  codexa-scanner audit --help\n\nExit codes: 0 no finding at/above threshold; 1 threshold reached; 2 usage, target, network, or report error.\nPrivate/loopback targets require the explicit --allow-private flag. Commands are bounded Web Audits; only use targets you are authorized to assess.")
 		return 0
 	}
 	if command != "audit" {
@@ -193,7 +236,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(stdout, "Usage: codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on critical|high|medium|low|info] [--json report.json|-] [--allow-private] [--timeout 3..60]\n\nExit codes: 0 below threshold; 1 threshold reached; 2 invalid input or execution/report error.")
+		fmt.Fprintln(stdout, "Usage: codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on critical|high|medium|low|info] [--json report.json|-] [--sarif report.sarif|-] [--allow-private] [--timeout 3..60]\n\nExit codes: 0 below threshold; 1 threshold reached; 2 invalid input or execution/report error.")
 		return 0
 	}
 	return runAudit(args, stdout, stderr)

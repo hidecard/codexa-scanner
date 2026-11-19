@@ -15,7 +15,7 @@ The CLI is part of the same executable; no separate binary or service is require
 ## Run an audit
 
 ```sh
-./build/bin/CodexaScanner audit --url https://example.com --fail-on high --json report.json
+./build/bin/CodexaScanner audit --url https://example.com --fail-on high --json report.json --sarif report.sarif
 ```
 
 `--url` may be repeated, up to 100 targets. Every submitted URL is its own scope; cross-host redirects, HTTPS downgrades, and out-of-scope ports remain blocked. The tool does not crawl linked pages, log in, submit forms, or exploit findings.
@@ -24,6 +24,7 @@ Options:
 
 - `--fail-on critical|high|medium|low|info` sets the minimum finding severity that causes exit code `1`; default is `high`.
 - `--json <path>` writes a shared, versioned, redacted JSON report with file mode restricted to the current user where supported. Use `--json -` to write only the JSON envelope to standard output.
+- `--sarif <path>` writes a SARIF 2.1.0 report suitable for CI tooling and GitHub Code Scanning ingestion. Rules are keyed by finding ID; SARIF `error`, `warning`, and `note` levels represent Codexa's high/critical, medium, and low/info severities respectively (they are not CVSS scores). Sensitive URL fields are redacted before findings are exported. Use `--sarif -` to write only SARIF JSON to standard output. `--json` and `--sarif` can be written together to separate files, but only one output may target stdout.
 - `--timeout 3..60` sets the per-request timeout in seconds; default is 10.
 - `--allow-private` opts this run into authorized private/loopback lab targets. It does not permit link-local, multicast, unspecified, or special-use/reserved addresses.
 - `--help` prints command usage. A leading `--cli` is optional, for example `CodexaScanner --cli audit --url https://example.com`.
