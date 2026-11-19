@@ -17,7 +17,7 @@ For development, run `wails dev` from the repository root. For a Linux desktop b
 
 ## 3. Choose the right feature
 
-Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, and manage reports.
+Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, select records across targets and scan types, and build consolidated engagement reports.
 
 Each feature guide explains its accepted input format, step-by-step workflow, output interpretation, limits, and troubleshooting:
 
@@ -32,7 +32,7 @@ Each feature guide explains its accepted input format, step-by-step workflow, ou
 
 ## 4. Recommended assessment workflow
 
-Start with the smallest authorized scope. Confirm the target and activity before each module. Review results and evidence rather than treating a clean result as proof of safety. If follow-up activity is needed, record the approved scope and rate limits before continuing. Export only the data required for the audience and redact sensitive values before delivery.
+Start with the smallest authorized scope. Confirm the target and activity before each module. Review results and evidence rather than treating a clean result as proof of safety. If follow-up activity is needed, record the approved scope and rate limits before continuing. In History, select only the records needed for the engagement and export a consolidated JSON/PDF report. Export only the data required for the audience and redact sensitive values before delivery.
 
 ## 5. Common UI behavior
 

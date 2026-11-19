@@ -2592,6 +2592,8 @@ var defaultReportRedactionPolicy = ReportRedactionPolicy{
 func inferReportType(defaultFilename string, data any) string {
 	name := strings.ToLower(strings.TrimSpace(defaultFilename))
 	switch {
+	case strings.Contains(name, "engagement"):
+		return "engagement"
 	case strings.Contains(name, "scan_history"):
 		return "scan-history"
 	case strings.Contains(name, "http"), strings.Contains(name, "web"):
@@ -2705,6 +2707,8 @@ func deriveReportSummary(reportType string, data any) *ReportSummary {
 	switch reportType {
 	case "web-audit":
 		return deriveWebAuditSummary(data)
+	case "engagement":
+		return deriveEngagementSummary(data)
 	case "scan-history":
 		return deriveHistorySummary(data)
 	default:
@@ -2752,6 +2756,13 @@ func deriveHistorySummary(data any) *ReportSummary {
 		TopFindings:     top,
 		Recommendations: []string{"Review exported history for sensitive targets or internal context before sharing externally."},
 	}
+}
+
+func deriveEngagementSummary(data any) *ReportSummary {
+	summary := deriveHistorySummary(data)
+	summary.Title = "Consolidated Engagement Report"
+	summary.Overview = "Shared, versioned report of selected authorized assessment records across multiple targets and scan types. Review and redact remaining sensitive data before sharing."
+	return summary
 }
 
 func deriveWebAuditSummary(data any) *ReportSummary {

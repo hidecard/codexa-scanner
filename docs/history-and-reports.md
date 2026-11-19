@@ -11,6 +11,7 @@ History keeps scan results locally in SQLite and lets you inspect recent records
 3. Enter the target used for a port scan in **Target for port diff** and refresh to compare the latest two port snapshots. Read the latest and previous timestamps. `NEW PORT DETECTED` means the port was in the newest snapshot but not the previous one; `Closed` means the reverse.
 4. To compare Web Audit snapshots, enter the audited URL (same target key) in the diff target field and select **Compare Web Audit Diff** (or refresh). The diff shows grade/risk/status changes, missing-header and finding ID additions/resolutions, and certificate days-remaining delta when available.
 5. Expand a history row to inspect its stored JSON result. Use **Export** on a row for that record, or **Delete** to remove it (confirmation required). Use the scan type and target shown in the row to distinguish records.
+6. Select the checkboxes on the records you want to include in one engagement deliverable. Use **Engagement JSON** or **Engagement PDF**; the button count shows how many records are selected. Selection can include different targets and scan types (ports, Web Audit, TLS, DNS, subdomains, path checks, and IP information).
 
 A diff is available only when two comparable snapshots exist for the normalized target. It is not a general network comparison and does not prove that a service changed permanently.
 
@@ -19,13 +20,14 @@ A diff is available only when two comparable snapshots exist for the normalized 
 - **Web Audit (current results):** Export **JSON** (versioned, redacted report envelope), **HTML**, **Markdown**, or **PDF** (branded report with executive summary, technical findings, severity breakdown, risk score, recommendations, metadata/redaction policy, and supported historical comparison when provided in the report payload).
 - **Ports:** Export CSV for current findings.
 - **History:** Use **Export History JSON** (Dashboard/History) to save currently loaded history records as a versioned, redacted JSON report envelope. Use per-row **Export** for a single stored record.
+- **Consolidated engagement:** Select history records, then use **Engagement JSON** or **Engagement PDF**. The selected records are grouped into one shared report envelope with an engagement summary (target count and scan-type breakdown). JSON preserves the complete bounded/redacted record set; PDF presents the executive summary and bounded report details for delivery.
 - **Clear All History** removes all local records (confirmation required).
 
 Choose a destination in native dialogs and verify contents before sharing.
 
 ## Report data model and redaction policy (Phase 5)
 
-JSON exports are written as a shared, versioned envelope (schema v1.0) including: `reportVersion`, `generatedAt`, `tool`, `reportType`, `metadata`, `redaction` policy, optional `summary`, optional `comparison`, and `data`. Bounded best-effort redaction is applied before persistence and export:
+JSON exports are written as a shared, versioned envelope (schema v1.0) including: `reportVersion`, `generatedAt`, `tool`, `reportType`, `metadata`, `redaction` policy, optional `summary`, optional `comparison`, and `data`. Consolidated engagement exports use `reportType: "engagement"` and keep the selected `HistoryEntry` records in `data`. Bounded best-effort redaction is applied before persistence and export:
 
 - Embedded URL credentials (userinfo)
 - Sensitive URL query parameters and fragments (token/key/secret/auth/session variants, etc.)

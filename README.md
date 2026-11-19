@@ -28,10 +28,10 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Passive technology and edge-product clues based on observed response headers, cookie names, and a bounded HTML sample. Fingerprints are clues, not confirmation of a WAF or product.
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.
-- Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
+- Local SQLite history for scan snapshots, capped at 2,000 records, with a latest-two-scan port diff for a target. History records can be selected across targets and scan types for consolidated engagement JSON/PDF reports. Stored targets/results and JSON exports apply bounded redaction for embedded URL credentials, sensitive query/fragments, and sensitive result keys (not a complete guarantee).
 - Web Audit: bounded HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/mixed-content and CSP diagnostics, passive CORS/JWT posture clues (including origin reflection), sampled DB-error disclosure, `security.txt`/`robots.txt` inspectors, and bounded client-side exposure audit (first-party JS secret-pattern clues with redacted previews, source-map reachability HEAD checks, API/BaaS endpoint extraction, DOM sink clues, harmless reflected-parameter indicator) with JSON/HTML/Markdown/PDF exports, request delay control, and per-URL snapshot diff.
 - Path Fuzzer: HEAD-only bounded path checks with framework/env/API presets and request delay control.
-- Shared, versioned report model with bounded redaction (credentials/sensitive URL query-fragments/sensitive keys) for persistence and exports.
+- Shared, versioned report model with bounded redaction (credentials/sensitive URL query-fragments/sensitive keys) for persistence, individual exports, history exports, and consolidated engagement reports.
 - Cross-platform desktop UI powered by Wails.
 
 ## How it works

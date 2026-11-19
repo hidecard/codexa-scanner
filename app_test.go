@@ -939,6 +939,20 @@ func TestPrepareScanReportEnvelopeSupportsComparisonWrapper(t *testing.T) {
 	}
 }
 
+func TestPrepareScanReportEnvelopeBuildsEngagementSummary(t *testing.T) {
+	input := `[{"id":1,"scanType":"port","target":"alpha.example","result":"{}"},{"id":2,"scanType":"http","target":"beta.example","result":"{}"}]`
+	env, _, err := prepareScanReportEnvelope("engagement_report.json", input)
+	if err != nil {
+		t.Fatalf("prepareScanReportEnvelope: %v", err)
+	}
+	if env.ReportType != "engagement" || env.Summary == nil || env.Summary.Title != "Consolidated Engagement Report" {
+		t.Fatalf("expected engagement report summary, got %+v", env)
+	}
+	if env.Summary.Targets != 2 || len(env.Summary.TopFindings) != 2 {
+		t.Fatalf("expected two targets and scan-type summary, got %+v", env.Summary)
+	}
+}
+
 func TestWritePDFReportCreatesFile(t *testing.T) {
 	input := `[{"url":"https://example.test","statusCode":200,"grade":"A","riskScore":5,"findings":[{"severity":"info","title":"Note","description":"d","recommendation":"r"}],"error":""}]`
 	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input)

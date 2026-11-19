@@ -89,6 +89,7 @@ export default function App() {
   const [ipResult, setIpResult] = useState<main.IPInformationResult | null>(null);
   const [historyTarget, setHistoryTarget] = useState('scanme.nmap.org');
   const [historyEntries, setHistoryEntries] = useState<main.HistoryEntry[]>([]);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<number[]>([]);
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'port' | 'http' | 'subdomain' | 'fuzzer' | 'tls' | 'dns' | 'ip'>('all');
   const [portDiff, setPortDiff] = useState<main.PortScanDiff | null>(null);
@@ -116,6 +117,7 @@ export default function App() {
   const [playbookStack, setPlaybookStack] = useState('Next.js');
   const [playbookQuery, setPlaybookQuery] = useState('');
   const [findingDrawerId, setFindingDrawerId] = useState<string | null>(null);
+  const selectedHistoryEntries = historyEntries.filter((entry) => selectedHistoryIds.includes(entry.id));
   const [detectedTechStack, setDetectedTechStack] = useState('Next.js');
 
   const errorMessage = (error: unknown, fallback: string) => {
@@ -391,7 +393,9 @@ export default function App() {
     setHistoryError('');
     try {
       const entries = await SearchScanHistory(50, historyTypeFilter === 'all' ? '' : historyTypeFilter, historySearch.trim());
-      setHistoryEntries(entries || []);
+      const nextEntries = entries || [];
+      setHistoryEntries(nextEntries);
+      setSelectedHistoryIds((previous) => previous.filter((id) => nextEntries.some((entry) => entry.id === id)));
       const target = historyTarget.trim();
       setPortDiff(target ? await DiffLatestPortScans(target) : null);
       setWebAuditDiff(target ? await DiffLatestWebAuditScans(target) : null);
@@ -439,6 +443,7 @@ export default function App() {
     try {
       await ClearScanHistory();
       setHistoryEntries([]);
+      setSelectedHistoryIds([]);
       setPortDiff(null);
       setWebAuditDiff(null);
     } catch (error) {
@@ -446,6 +451,18 @@ export default function App() {
     } finally {
       setIsHistoryBusy(false);
     }
+  };
+
+  const toggleHistorySelection = (id: number) => {
+    setSelectedHistoryIds((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id]);
+  };
+
+  const exportEngagementReport = (format: 'json' | 'pdf') => {
+    if (!selectedHistoryEntries.length) return;
+    const filename = format === 'json' ? 'engagement_report.json' : 'engagement_report.pdf';
+    const payload = JSON.stringify(selectedHistoryEntries);
+    if (format === 'json') void ExportJSON(filename, payload);
+    else void ExportPDF(filename, payload);
   };
 
   useEffect(() => {
@@ -1707,8 +1724,11 @@ ${rows || '<p>No results.</p>'}
               <button onClick={() => void runWebAuditDiff()} disabled={isHistoryBusy || !historyTarget.trim()} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Compare Web Audit Diff</button>
               <button onClick={() => void ExportJSON('scan_history.json', JSON.stringify(historyEntries))} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
               <button onClick={() => void ExportPDF('scan_history.pdf', JSON.stringify(historyEntries))} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History PDF</button>
+              <button onClick={() => exportEngagementReport('json')} disabled={!selectedHistoryEntries.length} className="min-h-10 rounded-lg border border-sky-800 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-300 disabled:opacity-40">Engagement JSON ({selectedHistoryEntries.length})</button>
+              <button onClick={() => exportEngagementReport('pdf')} disabled={!selectedHistoryEntries.length} className="min-h-10 rounded-lg border border-sky-800 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-300 disabled:opacity-40">Engagement PDF ({selectedHistoryEntries.length})</button>
               <button onClick={() => void handleClearHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg border border-rose-800 bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-950 disabled:opacity-40">Clear All History</button>
             </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">Select history records below to build one consolidated engagement report across targets and scan types. JSON/PDF exports use the shared versioned report envelope and bounded redaction.</p>
           </div>
           {portDiff && portDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h2 className="mb-2 text-sm font-bold">Port diff · {portDiff.target}</h2><p className="text-xs text-slate-400">Latest: {portDiff.latestAt ? new Date(portDiff.latestAt).toLocaleString() : '—'} · Previous: {portDiff.previousAt ? new Date(portDiff.previousAt).toLocaleString() : '—'}</p><div className="mt-2 flex flex-wrap gap-2">{portDiff.newPorts.map((port) => <span key={`new-${port}`} className="rounded border border-rose-700 bg-rose-950 px-2 py-1 text-xs text-rose-300">NEW PORT DETECTED · {port}</span>)}{portDiff.removedPorts.map((port) => <span key={`removed-${port}`} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300">Closed · {port}</span>)}{!portDiff.newPorts.length && !portDiff.removedPorts.length && <span className="text-xs text-slate-500">No changes yet, or fewer than two port scans are saved.</span>}</div></div> : null}
           {webAuditDiff && webAuditDiff.target ? <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2"><h2 className="text-sm font-bold">Web Audit diff · {webAuditDiff.target}</h2><p className="text-xs text-slate-400">Latest: {webAuditDiff.latestAt ? new Date(webAuditDiff.latestAt).toLocaleString() : '—'} · Previous: {webAuditDiff.previousAt ? new Date(webAuditDiff.previousAt).toLocaleString() : '—'}</p>{webAuditDiff.note && <p className="text-xs text-slate-500">{webAuditDiff.note}</p>}{webAuditDiff.urlDiffs?.map((d) => (<div key={d.url} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs space-y-1"><div className="font-semibold text-slate-200 break-all">{d.url}</div><div className="flex flex-wrap gap-2">{d.gradeChanged ? <span className="rounded bg-amber-950 border border-amber-800 px-2 py-0.5 text-amber-300">Grade {d.previousGrade || '—'} â†’ {d.latestGrade || '—'}</span> : <span className="text-slate-500">Grade unchanged ({d.latestGrade || '—'})</span>}<span className="rounded bg-slate-800 px-2 py-0.5">Risk {d.previousRiskScore} â†’ {d.latestRiskScore} ({d.riskScoreDelta >= 0 ? '+' : ''}{d.riskScoreDelta})</span>{d.statusChanged && <span className="rounded bg-slate-800 px-2 py-0.5">Status {d.previousStatus} â†’ {d.latestStatus}</span>}{d.certDaysDelta != null && <span className="rounded bg-slate-800 px-2 py-0.5">Cert days {d.previousCertDays ?? 'n/a'} â†’ {d.latestCertDays ?? 'n/a'} ({d.certDaysDelta >= 0 ? '+' : ''}{d.certDaysDelta})</span>}</div><div className="flex flex-wrap gap-2">{d.newMissingHeaders?.map((h) => <span key={`nm-${h}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New missing: {h}</span>)}{d.resolvedMissingHeaders?.map((h) => <span key={`rm-${h}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved missing: {h}</span>)}{d.newFindingIds?.map((id) => <span key={`nf-${id}`} className="rounded border border-rose-800 bg-rose-950/40 px-2 py-0.5 text-rose-300">New finding: {id}</span>)}{d.resolvedFindingIds?.map((id) => <span key={`rf-${id}`} className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">Resolved finding: {id}</span>)}</div>{!d.gradeChanged && d.riskScoreDelta === 0 && !d.statusChanged && d.certDaysDelta == null && !(d.newMissingHeaders?.length) && !(d.resolvedMissingHeaders?.length) && !(d.newFindingIds?.length) && !(d.resolvedFindingIds?.length) && <span className="text-slate-500">No compared changes detected.</span>}</div>))}</div> : null}
@@ -1718,6 +1738,7 @@ ${rows || '<p>No results.</p>'}
             ) : historyEntries.map((entry) => (
               <details key={entry.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
                 <summary className="cursor-pointer break-all text-xs leading-relaxed">
+                  <input type="checkbox" checked={selectedHistoryIds.includes(entry.id)} onChange={() => toggleHistorySelection(entry.id)} onClick={(event) => event.stopPropagation()} className="mr-2 accent-sky-500" aria-label={`Select ${entry.target} for engagement report`} />
                   <span className="mr-2 rounded bg-slate-800 px-2 py-1 text-emerald-300">{entry.scanType}</span>{entry.target}
                   <span className="ml-3 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
                 </summary>
