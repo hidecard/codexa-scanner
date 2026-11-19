@@ -23,19 +23,19 @@ const discoveryWorkers = 20
 
 // SubdomainResult contains names found passively and, when requested, by DNS wordlist probing.
 type SubdomainResult struct {
-	Domain         string               `json:"domain"`
-	Names          []string             `json:"names"`
-	Errors         []string             `json:"errors,omitempty"`
-	TakeoverClues  []TakeoverClue       `json:"takeoverClues,omitempty"`
+	Domain        string         `json:"domain"`
+	Names         []string       `json:"names"`
+	Errors        []string       `json:"errors,omitempty"`
+	TakeoverClues []TakeoverClue `json:"takeoverClues,omitempty"`
 }
 
 type TakeoverClue struct {
-	Subdomain     string `json:"subdomain"`
-	CNAMETarget   string `json:"cnameTarget"`
-	Provider      string `json:"provider"`
-	Status        string `json:"status"` // "unresolved", "unclaimed", "potential"
-	Evidence      string `json:"evidence"`
-	Remediation   string `json:"remediation"`
+	Subdomain   string `json:"subdomain"`
+	CNAMETarget string `json:"cnameTarget"`
+	Provider    string `json:"provider"`
+	Status      string `json:"status"` // "unresolved", "unclaimed", "potential"
+	Evidence    string `json:"evidence"`
+	Remediation string `json:"remediation"`
 }
 
 // PathFinding intentionally contains no response body or body-derived data.
@@ -60,38 +60,44 @@ const (
 )
 
 type TLSInspection struct {
-	Host            string         `json:"host"`
-	Port            string         `json:"port"`
-	Subject         string         `json:"subject"`
-	Issuer          string         `json:"issuer"`
-	NotBefore       time.Time      `json:"notBefore"`
-	NotAfter        time.Time      `json:"notAfter"`
-	DaysRemaining   int            `json:"daysRemaining"`
-	SANs            []string       `json:"sans"`
-	SelfSigned      bool           `json:"selfSigned"`
-	Trusted         bool           `json:"trusted"`
-	ValidationError string         `json:"validationError,omitempty"`
-	TLSVersion      string         `json:"tlsVersion"`
-	CipherSuite     string         `json:"cipherSuite"`
-	TLS10Status     TLSProbeStatus `json:"tls10Status"`
-	TLS11Status     TLSProbeStatus `json:"tls11Status"`
-	TLS10Error      string         `json:"tls10Error,omitempty"`
-	TLS11Error      string         `json:"tls11Error,omitempty"`
+	Host               string         `json:"host"`
+	Port               string         `json:"port"`
+	Subject            string         `json:"subject"`
+	Issuer             string         `json:"issuer"`
+	NotBefore          time.Time      `json:"notBefore"`
+	NotAfter           time.Time      `json:"notAfter"`
+	DaysRemaining      int            `json:"daysRemaining"`
+	SANs               []string       `json:"sans"`
+	SelfSigned         bool           `json:"selfSigned"`
+	Trusted            bool           `json:"trusted"`
+	ValidationError    string         `json:"validationError,omitempty"`
+	TLSVersion         string         `json:"tlsVersion"`
+	CipherSuite        string         `json:"cipherSuite"`
+	TLS10Status        TLSProbeStatus `json:"tls10Status"`
+	TLS11Status        TLSProbeStatus `json:"tls11Status"`
+	TLS10Error         string         `json:"tls10Error,omitempty"`
+	TLS11Error         string         `json:"tls11Error,omitempty"`
+	NegotiatedProtocol string         `json:"negotiatedProtocol,omitempty"`
+	HTTP2Supported     bool           `json:"http2Supported"`
+	HTTP3Advertised    bool           `json:"http3Advertised"`
+	HTTP3Advertisement string         `json:"http3Advertisement,omitempty"`
+	WeakTLS12Ciphers   []string       `json:"weakTls12Ciphers,omitempty"`
+	WeakCipherWarning  string         `json:"weakCipherWarning,omitempty"`
 }
 type DNSIntelligenceResult struct {
-	Domain         string              `json:"domain"`
-	A              []string            `json:"a"`
-	AAAA           []string            `json:"aaaa"`
-	MX             []string            `json:"mx"`
-	NS             []string            `json:"ns"`
-	TXT            []string            `json:"txt"`
-	SPF            []string            `json:"spf"`
-	DMARC          []string            `json:"dmarc"`
-	DKIM           []DKIMRecord        `json:"dkim,omitempty"`
-	PTR            map[string][]string `json:"ptr"`
-	RDAP           []RDAPInfo          `json:"rdap,omitempty"`
-	Errors         []string            `json:"errors,omitempty"`
-	EmailPolicy    *EmailPolicyAnalysis `json:"emailPolicy,omitempty"`
+	Domain      string               `json:"domain"`
+	A           []string             `json:"a"`
+	AAAA        []string             `json:"aaaa"`
+	MX          []string             `json:"mx"`
+	NS          []string             `json:"ns"`
+	TXT         []string             `json:"txt"`
+	SPF         []string             `json:"spf"`
+	DMARC       []string             `json:"dmarc"`
+	DKIM        []DKIMRecord         `json:"dkim,omitempty"`
+	PTR         map[string][]string  `json:"ptr"`
+	RDAP        []RDAPInfo           `json:"rdap,omitempty"`
+	Errors      []string             `json:"errors,omitempty"`
+	EmailPolicy *EmailPolicyAnalysis `json:"emailPolicy,omitempty"`
 }
 
 type DKIMRecord struct {
@@ -103,16 +109,16 @@ type DKIMRecord struct {
 }
 
 type EmailPolicyAnalysis struct {
-	SPF    SPFAnalysis    `json:"spf"`
-	DMARC  DMARCAnalysis  `json:"dmarc"`
-	DKIM   DKIMAnalysis   `json:"dkim"`
-	Rating string         `json:"rating"` // "strong", "moderate", "weak", "missing"
+	SPF    SPFAnalysis   `json:"spf"`
+	DMARC  DMARCAnalysis `json:"dmarc"`
+	DKIM   DKIMAnalysis  `json:"dkim"`
+	Rating string        `json:"rating"` // "strong", "moderate", "weak", "missing"
 }
 
 type SPFAnalysis struct {
 	Record         string   `json:"record"`
 	HasSPF         bool     `json:"hasSPF"`
-	AllMechanism   string   `json:"allMechanism,omitempty"`  // "+all", "~all", "-all", "?all"
+	AllMechanism   string   `json:"allMechanism,omitempty"` // "+all", "~all", "-all", "?all"
 	WeakMechanisms []string `json:"weakMechanisms,omitempty"`
 	Includes       []string `json:"includes,omitempty"`
 	Redirects      []string `json:"redirects,omitempty"`
@@ -120,28 +126,28 @@ type SPFAnalysis struct {
 }
 
 type DMARCAnalysis struct {
-	Record         string   `json:"record"`
-	HasDMARC       bool     `json:"hasDMARC"`
-	Policy         string   `json:"policy,omitempty"`        // "none", "quarantine", "reject"
-	SubdomainPolicy string  `json:"subdomainPolicy,omitempty"`
-	Percent        int      `json:"percent,omitempty"`
-	RUA            []string `json:"rua,omitempty"`
-	RUF            []string `json:"ruf,omitempty"`
-	Alignment      Alignment `json:"alignment,omitempty"`
-	Warnings       []string `json:"warnings,omitempty"`
+	Record          string    `json:"record"`
+	HasDMARC        bool      `json:"hasDMARC"`
+	Policy          string    `json:"policy,omitempty"` // "none", "quarantine", "reject"
+	SubdomainPolicy string    `json:"subdomainPolicy,omitempty"`
+	Percent         int       `json:"percent,omitempty"`
+	RUA             []string  `json:"rua,omitempty"`
+	RUF             []string  `json:"ruf,omitempty"`
+	Alignment       Alignment `json:"alignment,omitempty"`
+	Warnings        []string  `json:"warnings,omitempty"`
 }
 
 type Alignment struct {
-	SPF string `json:"spf,omitempty"` // "r" (relaxed), "s" (strict)
+	SPF  string `json:"spf,omitempty"` // "r" (relaxed), "s" (strict)
 	DKIM string `json:"dkim,omitempty"`
 }
 
 type DKIMAnalysis struct {
-	RecordsFound  int      `json:"recordsFound"`
-	Selectors     []string `json:"selectors,omitempty"`
-	KeyTypes      []string `json:"keyTypes,omitempty"`
-	KeySizes      []int    `json:"keySizes,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	RecordsFound int      `json:"recordsFound"`
+	Selectors    []string `json:"selectors,omitempty"`
+	KeyTypes     []string `json:"keyTypes,omitempty"`
+	KeySizes     []int    `json:"keySizes,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
 }
 type RDAPInfo struct {
 	IP            string `json:"ip"`
@@ -153,7 +159,7 @@ type RDAPInfo struct {
 type IPInformationResult struct {
 	IP           string    `json:"ip"`
 	AddressClass string    `json:"addressClass"`
-	ReverseDNS  []string  `json:"reverseDns"`
+	ReverseDNS   []string  `json:"reverseDns"`
 	RDAP         *RDAPInfo `json:"rdap,omitempty"`
 	Sources      []string  `json:"sources"`
 	Errors       []string  `json:"errors,omitempty"`
@@ -312,8 +318,8 @@ func checkTakeoverClues(subdomains []string) []TakeoverClue {
 
 	// Known cloud provider CNAME patterns
 	providerPatterns := map[string][]struct {
-		pattern     string
-		provider    string
+		pattern        string
+		provider       string
 		checkUnclaimed func(string) (bool, string)
 	}{
 		"github.io": {
@@ -454,7 +460,7 @@ func checkTakeoverClues(subdomains []string) []TakeoverClue {
 					ips, err := res.LookupIPAddr(ctx, cname)
 					status := "potential"
 					evidence := fmt.Sprintf("CNAME points to %s (%s)", cname, p.provider)
-					
+
 					if err != nil || len(ips) == 0 {
 						status = "unresolved"
 						evidence = fmt.Sprintf("CNAME target %s does not resolve (%s)", cname, p.provider)
@@ -493,11 +499,22 @@ func checkTakeoverClues(subdomains []string) []TakeoverClue {
 func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, proxyURL string) PathFuzzResult {
 	u, err := validateDiscoveryURL(baseURL)
 	r := PathFuzzResult{BaseURL: baseURL, Paths: []PathFinding{}}
-	if err != nil { r.Error = err.Error(); return r }
-	if concurrency < 1 { concurrency = 5 }
-	if concurrency > discoveryWorkers { concurrency = discoveryWorkers }
-	if requestDelayMs < 0 { requestDelayMs = 0 }
-	if requestDelayMs > 5000 { requestDelayMs = 5000 }
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	if concurrency < 1 {
+		concurrency = 5
+	}
+	if concurrency > discoveryWorkers {
+		concurrency = discoveryWorkers
+	}
+	if requestDelayMs < 0 {
+		requestDelayMs = 0
+	}
+	if requestDelayMs > 5000 {
+		requestDelayMs = 5000
+	}
 	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
 	profile := resolveHTTPRequestProfile(HTTPRequestProfile{UserAgent: userAgent, TimeoutSeconds: timeoutSeconds, ProxyURL: proxyURL})
 	ua := profile.UserAgent
@@ -505,41 +522,71 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 	seen := map[string]bool{}
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
-		if !validFuzzPath(p) || seen[p] { continue }
+		if !validFuzzPath(p) || seen[p] {
+			continue
+		}
 		seen[p] = true
 		clean = append(clean, p)
-		if len(clean) >= discoveryLimit { break }
+		if len(clean) >= discoveryLimit {
+			break
+		}
 	}
 	client := newScopedHTTPClientForFuzzer(u.String(), profile)
 	baselineStatus, baselineLength := 0, int64(-1)
 	if req, e := http.NewRequest(http.MethodHead, joinFuzzURL(u, "/__codexa_missing_probe_7f31d9"), nil); e == nil {
 		req.Header.Set("User-Agent", ua)
-		if resp, e := client.Do(req); e == nil { baselineStatus = resp.StatusCode; baselineLength = resp.ContentLength; resp.Body.Close() }
+		if resp, e := client.Do(req); e == nil {
+			baselineStatus = resp.StatusCode
+			baselineLength = resp.ContentLength
+			resp.Body.Close()
+		}
 	}
 	sem := make(chan struct{}, concurrency)
 	results := make([]PathFinding, len(clean))
 	keep := make([]bool, len(clean))
 	var wg sync.WaitGroup
 	ctx := a.ctx
-	if ctx == nil { ctx = context.Background() }
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var gateMu sync.Mutex
 	var last time.Time
-	nextSlot := func() bool { gateMu.Lock(); defer gateMu.Unlock(); t, ok := a.waitForRateSlot(ctx, last, rate); last = t; return ok }
+	nextSlot := func() bool {
+		gateMu.Lock()
+		defer gateMu.Unlock()
+		t, ok := a.waitForRateSlot(ctx, last, rate)
+		last = t
+		return ok
+	}
 	for i, p := range clean {
-		if ctx.Err() != nil { break }
-		wg.Add(1); sem <- struct{}{}
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
 		go func(i int, p string) {
-			defer wg.Done(); defer func() { <-sem }()
-			if !nextSlot() { return }
+			defer wg.Done()
+			defer func() { <-sem }()
+			if !nextSlot() {
+				return
+			}
 			if requestDelayMs > 0 {
-				select { case <-ctx.Done(): return; case <-time.After(time.Duration(requestDelayMs) * time.Millisecond): }
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Duration(requestDelayMs) * time.Millisecond):
+				}
 			}
 			target := joinFuzzURL(u, p)
 			req, e := http.NewRequest(http.MethodHead, target, nil)
-			if e != nil { return }
+			if e != nil {
+				return
+			}
 			req.Header.Set("User-Agent", ua)
 			resp, e := client.Do(req)
-			if e != nil { return }
+			if e != nil {
+				return
+			}
 			resp.Body.Close()
 			if isInterestingPathStatus(resp.StatusCode) && !isGenericNotFound(resp.StatusCode, resp.ContentLength, baselineStatus, baselineLength) {
 				results[i] = PathFinding{URL: target, StatusCode: resp.StatusCode, ContentLength: resp.ContentLength}
@@ -548,7 +595,11 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 		}(i, p)
 	}
 	wg.Wait()
-	for i := range results { if keep[i] { r.Paths = append(r.Paths, results[i]) } }
+	for i := range results {
+		if keep[i] {
+			r.Paths = append(r.Paths, results[i])
+		}
+	}
 	_ = a.saveHistory("fuzzer", u.String(), r)
 	return r
 }
@@ -616,7 +667,7 @@ func (a *App) InspectTLS(target string) TLSInspection {
 		return out
 	}
 	addr := net.JoinHostPort(host, port)
-	cfg := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS13}
+	cfg := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}
 	conn, e := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", addr, cfg)
 	if e != nil {
 		out.ValidationError = e.Error()
@@ -628,16 +679,19 @@ func (a *App) InspectTLS(target string) TLSInspection {
 		}
 		// Retry only to inspect the presented certificate after verified validation failed.
 		// The result is explicitly marked untrusted; this connection is never used for HTTP.
-		diagnostic := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS13, InsecureSkipVerify: true} //nolint:gosec
+		diagnostic := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}, InsecureSkipVerify: true} //nolint:gosec
 		if c, de := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", addr, diagnostic); de == nil {
 			state := c.ConnectionState()
 			out.TLSVersion = tlsVersionName(state.Version)
 			out.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
+			fillTLSProtocol(&out, state)
 			if len(state.PeerCertificates) > 0 {
 				fillTLSCertificate(&out, state.PeerCertificates[0])
 			}
 			c.Close()
 		}
+		inspectTLS12WeakCiphers(&out, host, addr)
+		inspectHTTP3Advertisement(&out, host, port)
 		probeLegacyTLS(&out, host, addr)
 		_ = a.saveHistory("tls", net.JoinHostPort(host, port), out)
 		return out
@@ -646,13 +700,111 @@ func (a *App) InspectTLS(target string) TLSInspection {
 	state := conn.ConnectionState()
 	out.TLSVersion = tlsVersionName(state.Version)
 	out.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
+	fillTLSProtocol(&out, state)
 	out.Trusted = len(state.VerifiedChains) > 0
 	if len(state.PeerCertificates) > 0 {
 		fillTLSCertificate(&out, state.PeerCertificates[0])
 	}
+	inspectTLS12WeakCiphers(&out, host, addr)
+	inspectHTTP3Advertisement(&out, host, port)
 	probeLegacyTLS(&out, host, addr)
 	_ = a.saveHistory("tls", net.JoinHostPort(host, port), out)
 	return out
+}
+
+func fillTLSProtocol(out *TLSInspection, state tls.ConnectionState) {
+	out.NegotiatedProtocol = state.NegotiatedProtocol
+	out.HTTP2Supported = state.NegotiatedProtocol == "h2"
+	if out.TLSVersion == tlsVersionName(tls.VersionTLS12) && isWeakTLSCipherName(out.CipherSuite) {
+		out.WeakCipherWarning = fmt.Sprintf("Negotiated legacy TLS 1.2 cipher %s.", out.CipherSuite)
+	}
+}
+
+func isWeakTLSCipherName(name string) bool {
+	upper := strings.ToUpper(name)
+	return strings.Contains(upper, "_CBC_") || strings.Contains(upper, "3DES") || strings.Contains(upper, "RC4") || strings.Contains(upper, "_NULL_")
+}
+
+type weakTLS12Cipher struct {
+	id   uint16
+	name string
+}
+
+var weakTLS12Ciphers = []weakTLS12Cipher{
+	{id: 0x0005, name: "TLS_RSA_WITH_RC4_128_SHA"},
+	{id: 0x000a, name: "TLS_RSA_WITH_3DES_EDE_CBC_SHA"},
+	{id: 0x002f, name: "TLS_RSA_WITH_AES_128_CBC_SHA"},
+	{id: 0x0035, name: "TLS_RSA_WITH_AES_256_CBC_SHA"},
+	{id: 0xc008, name: "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA"},
+	{id: 0xc009, name: "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA"},
+	{id: 0xc00a, name: "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA"},
+	{id: 0xc012, name: "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"},
+	{id: 0xc013, name: "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA"},
+	{id: 0xc014, name: "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA"},
+}
+
+func inspectTLS12WeakCiphers(out *TLSInspection, host, addr string) {
+	for _, candidate := range weakTLS12Ciphers {
+		cfg := &tls.Config{
+			ServerName:         host,
+			MinVersion:         tls.VersionTLS12,
+			MaxVersion:         tls.VersionTLS12,
+			CipherSuites:       []uint16{candidate.id},
+			InsecureSkipVerify: true, //nolint:gosec -- handshake-only capability probe; never used for HTTP or trust decisions.
+		}
+		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 1200 * time.Millisecond}, "tcp", addr, cfg)
+		if err != nil {
+			continue
+		}
+		state := conn.ConnectionState()
+		conn.Close()
+		if state.Version == tls.VersionTLS12 && state.CipherSuite == candidate.id {
+			out.WeakTLS12Ciphers = append(out.WeakTLS12Ciphers, candidate.name)
+		}
+	}
+	sortStrings(out.WeakTLS12Ciphers)
+	if len(out.WeakTLS12Ciphers) > 0 && out.WeakCipherWarning == "" {
+		out.WeakCipherWarning = "The server accepted one or more legacy TLS 1.2 cipher suites; prefer modern AEAD suites."
+	}
+}
+
+func inspectHTTP3Advertisement(out *TLSInspection, host, port string) {
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName:         host,
+			MinVersion:         tls.VersionTLS10,
+			MaxVersion:         tls.VersionTLS13,
+			NextProtos:         []string{"h2", "http/1.1"},
+			InsecureSkipVerify: true, //nolint:gosec -- reads only response headers for a diagnostic; certificate trust is reported separately.
+		},
+		ForceAttemptHTTP2: true,
+	}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Get("https://" + net.JoinHostPort(host, port) + "/")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	altSvc := resp.Header.Get("Alt-Svc")
+	if advertisement := parseHTTP3Advertisement(altSvc); advertisement != "" {
+		out.HTTP3Advertised = true
+		out.HTTP3Advertisement = advertisement
+	}
+	if out.NegotiatedProtocol == "" {
+		out.NegotiatedProtocol = resp.Proto
+		out.HTTP2Supported = resp.ProtoMajor == 2
+	}
+}
+
+func parseHTTP3Advertisement(altSvc string) string {
+	for _, part := range strings.Split(altSvc, ",") {
+		value := strings.TrimSpace(part)
+		lower := strings.ToLower(value)
+		if strings.HasPrefix(lower, "h3=") || strings.HasPrefix(lower, "h3-") || strings.HasPrefix(lower, "h3\"") {
+			return value
+		}
+	}
+	return ""
 }
 
 func probeLegacyTLS(out *TLSInspection, host, addr string) {

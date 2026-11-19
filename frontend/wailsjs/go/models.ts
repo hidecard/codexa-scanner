@@ -972,6 +972,12 @@ export namespace main {
 	    tls11Status: string;
 	    tls10Error?: string;
 	    tls11Error?: string;
+	    negotiatedProtocol?: string;
+	    http2Supported: boolean;
+	    http3Advertised: boolean;
+	    http3Advertisement?: string;
+	    weakTls12Ciphers?: string[];
+	    weakCipherWarning?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TLSInspection(source);
@@ -996,6 +1002,12 @@ export namespace main {
 	        this.tls11Status = source["tls11Status"];
 	        this.tls10Error = source["tls10Error"];
 	        this.tls11Error = source["tls11Error"];
+	        this.negotiatedProtocol = source["negotiatedProtocol"];
+	        this.http2Supported = source["http2Supported"];
+	        this.http3Advertised = source["http3Advertised"];
+	        this.http3Advertisement = source["http3Advertisement"];
+	        this.weakTls12Ciphers = source["weakTls12Ciphers"];
+	        this.weakCipherWarning = source["weakCipherWarning"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1128,4 +1140,3 @@ export namespace main {
 	
 
 }
-

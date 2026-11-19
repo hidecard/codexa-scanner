@@ -1589,17 +1589,21 @@ ${rows || '<p>No results.</p>'}
             <label className="block text-xs text-slate-400">Authorized hostname or host:port</label>
             <input value={tlsTarget} onChange={(e) => setTlsTarget(e.target.value)} placeholder="example.com:443" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" />
             <button onClick={runTLSInspector} disabled={isReconBusy} className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold disabled:bg-slate-700">{isReconBusy ? 'Inspecting TLSâ€¦' : 'Inspect Certificate & Protocols'}</button>
-            <p className="text-[11px] text-slate-500">Protocol probes perform TLS handshakes only. “Not supportedâ€ requires an explicit TLS protocol_version alert; connection, handshake, and local-policy errors are “Inconclusive.â€ Certificate details are independently checked against the system trust store.</p>
+            <p className="text-[11px] text-slate-500">Protocol probes perform bounded TLS handshakes only. HTTP/2 is reported from negotiated ALPN; HTTP/3 is reported only when the HTTPS response advertises an h3 Alt-Svc value, not as proof of a successful QUIC connection. Legacy TLS 1.2 cipher probes are handshake-only. “Not supported” requires an explicit TLS protocol_version alert; other connection, handshake, and local-policy errors are “Inconclusive.”</p>
           </div>
           {tlsResult && <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
             <h2 className="break-all text-sm font-bold">TLS details · {tlsResult.host}:{tlsResult.port}</h2>
             {tlsResult.validationError && <p className="break-all text-xs text-amber-300">{tlsResult.validationError}</p>}
             <div className="grid gap-2 text-xs md:grid-cols-2">
-              <div className="rounded bg-slate-950 p-3">Negotiated: {tlsResult.tlsVersion || 'Unavailable'} · {tlsResult.cipherSuite || 'No cipher'}</div>
+              <div className="rounded bg-slate-950 p-3">Negotiated: {tlsResult.tlsVersion || 'Unavailable'} · {tlsResult.cipherSuite || 'No cipher'}{tlsResult.negotiatedProtocol ? ` · ${tlsResult.negotiatedProtocol}` : ''}</div>
               <div className={`rounded p-3 ${tlsResult.trusted ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}`}>{tlsResult.trusted ? 'Certificate trusted' : 'Certificate not verified'}{tlsResult.selfSigned ? ' · Self-signed' : ''}</div>
               {tlsResult.subject && <div className="rounded bg-slate-950 p-3">Subject: {tlsResult.subject}<br />Issuer: {tlsResult.issuer}</div>}
               {tlsResult.notAfter && <div className="rounded bg-slate-950 p-3">Expires: {new Date(tlsResult.notAfter).toLocaleString()} · {tlsResult.daysRemaining} day(s) remaining</div>}
+              <div className={`rounded p-3 ${tlsResult.http2Supported ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-400'}`}>HTTP/2: {tlsResult.http2Supported ? 'Negotiated via ALPN' : 'Not negotiated'}</div>
+              <div className={`rounded p-3 ${tlsResult.http3Advertised ? 'bg-sky-950 text-sky-300' : 'bg-slate-950 text-slate-400'}`}>HTTP/3: {tlsResult.http3Advertised ? `Advertised · ${tlsResult.http3Advertisement}` : 'Not advertised by Alt-Svc'}</div>
             </div>
+            {tlsResult.weakCipherWarning && <p className="rounded border border-amber-800 bg-amber-950/40 p-3 text-xs text-amber-300">{tlsResult.weakCipherWarning}</p>}
+            {tlsResult.weakTls12Ciphers?.length ? <div className="rounded border border-rose-800 bg-rose-950/30 p-3 text-xs text-rose-300"><div className="font-semibold">Accepted legacy TLS 1.2 ciphers</div><div className="mt-1 break-all font-mono">{tlsResult.weakTls12Ciphers.join(' · ')}</div></div> : null}
             {(tlsResult.tls10Status || tlsResult.tls11Status) && (
               <div className="grid gap-2 sm:grid-cols-2">
                 {[

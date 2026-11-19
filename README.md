@@ -24,7 +24,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - Bulk analysis of up to 100 URLs with bounded concurrency and redirect depth.
 - Subdomain discovery from Certificate Transparency data, with an optional, capped DNS wordlist lookup; discovered names can be sent to the HTTP analyzer.
 - A path discovery module that uses HEAD requests only, compares status/Content-Length to a randomized missing-path baseline, and never returns response bodies.
-- A TLS inspector for certificate trust/self-signed state, expiry, subject alternative names, and negotiated cipher. TLS 1.0/1.1 probes report Supported after an exact-version handshake, Not supported only after an explicit `protocol_version` alert, and otherwise Inconclusive with the probe error.
+- A TLS inspector for certificate trust/self-signed state, expiry, subject alternative names, negotiated protocol/cipher, HTTP/2 ALPN, HTTP/3 `Alt-Svc` advertisements, and bounded TLS 1.2 legacy-cipher probes. TLS 1.0/1.1 probes report Supported after an exact-version handshake, Not supported only after an explicit `protocol_version` alert, and otherwise Inconclusive with the probe error.
 - Passive technology and edge-product clues based on observed response headers, cookie names, and a bounded HTML sample. Fingerprints are clues, not confirmation of a WAF or product.
 - DNS/network intelligence for A, AAAA, MX, NS, TXT, SPF, DMARC and reverse PTR records; optional RDAP registration/country metadata is fetched from an external service.
 - Source-labeled IP Information for public/private/special-use classification, reverse DNS, and public-IP RDAP registration metadata; no geolocation is inferred.

@@ -138,6 +138,34 @@ func TestClassifyLegacyTLSProbe(t *testing.T) {
 	}
 }
 
+func TestTLSProtocolAndWeakCipherClassification(t *testing.T) {
+	if !isWeakTLSCipherName("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA") {
+		t.Fatal("CBC cipher should be classified as weak")
+	}
+	if isWeakTLSCipherName("TLS_AES_128_GCM_SHA256") {
+		// This assertion intentionally documents the modern AEAD baseline.
+		t.Fatal("modern AEAD cipher should not be classified as weak")
+	}
+}
+
+func TestParseHTTP3Advertisement(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		alt  string
+		want string
+	}{
+		{name: "h3 first", alt: `h3=":443"; ma=86400`, want: `h3=":443"; ma=86400`},
+		{name: "h3 after h2", alt: `h2=":443"; ma=60, h3-29=":443"`, want: `h3-29=":443"`},
+		{name: "no h3", alt: `h2=":443"; ma=60`, want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := parseHTTP3Advertisement(test.alt); got != test.want {
+				t.Fatalf("parseHTTP3Advertisement(%q)=%q, want %q", test.alt, got, test.want)
+			}
+		})
+	}
+}
+
 func TestGenericNotFoundBaselineUsesStatusAndSize(t *testing.T) {
 	if !isGenericNotFound(http.StatusNotFound, 120, http.StatusNotFound, 120) {
 		t.Fatal("same status and size should match catch-all baseline")
