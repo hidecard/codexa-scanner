@@ -1,6 +1,6 @@
 # Engagement Workflows
 
-This guide covers the cross-module workflow features shipped in Codexa Scanner 1.1.5. Use them only within an approved assessment scope.
+This guide covers the cross-module workflow features shipped in Codexa Scanner 1.1.6. Use them only within an approved assessment scope.
 
 ## Workspaces
 
@@ -36,3 +36,4 @@ Web Audit, Path Fuzzer, and CIDR Sweep support bounded RPS controls and optional
 ## Reports and analyst triage
 
 History records can be tagged `Verified`, `False Positive`, `Needs Review`, or `Accepted Risk`, and analysts can attach notes to findings. Tags and notes persist locally and are included in relevant report exports. Review and redact reports before sharing because banners, URLs, hostnames, and registry data may still be sensitive.
+

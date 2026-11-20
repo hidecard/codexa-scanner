@@ -1,5 +1,7 @@
 # Codexa Scanner Documentation
 
+- Docs web: https://codexa-scanner.spacetikapp.com/
+
 Codexa Scanner is a bounded, non-exploitative desktop assessment tool. Use it only against systems you own or are explicitly authorized to assess.
 
 ## Guides
@@ -16,6 +18,8 @@ Codexa Scanner is a bounded, non-exploitative desktop assessment tool. Use it on
 - [History and Reports](history-and-reports.md) — local retention, port diffs, and exports.
 - [Latest Threat & CVE Feed](cve-feed.md) — opt-in CISA KEV/NVD sync, SQLite caching, offline fallback, and scanned-asset matching.
 - [Engagement Workflows](engagement-workflows.md) — workspaces, Nmap/subdomain import, HTTP Inspector, replay, Playbook, command palette, rate controls, and analyst triage.
-- [Release & Installer Verification (v1.1.5)](release-verification.md) — CI release workflow, v1.1.5 `.deb`/`.exe`/`.dmg` assets, and clean-machine install/upgrade/uninstall checks.
+- [Release & Installer Verification (v1.1.6)](release-verification.md) — CI release workflow, v1.1.6 `.deb`/`.exe`/`.dmg` assets, and clean-machine install/upgrade/uninstall checks.
 
 The feature guides cover the Dashboard, network modules, Web Audit, CVE feed, engagement workflows, reports, privacy, limits, and release verification. Each page documents what the module does, what it does not do, and how to interpret its output.
+
+

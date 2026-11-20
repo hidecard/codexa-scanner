@@ -25,3 +25,4 @@ The input list is capped at 500 paths and invalid or duplicate entries are skipp
 ## Troubleshooting
 
 If the base URL is rejected, add `http://` or `https://` and remove credentials, fragments, and query strings. If every candidate is filtered, the site may use a catch-all response; compare with an approved known path rather than assuming there are no routes. If the server does not support HEAD correctly, results may be incomplete and should be verified through a separately authorized method.
+

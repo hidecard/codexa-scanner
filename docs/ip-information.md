@@ -24,3 +24,4 @@ The feature can generate a DNS PTR request and, for public addresses, an externa
 ## Troubleshooting
 
 If the input is rejected, enter only a literal IPv4 or IPv6 address without a scheme, port, brackets, or hostname. If PTR or RDAP is unavailable, the address classification remains useful and the result will show the corresponding warning. A missing PTR name is normal for many addresses and is not evidence that the address is unused.
+

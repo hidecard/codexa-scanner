@@ -30,3 +30,4 @@ The scanner uses a bounded worker pool, per-connection timeout, cancellable life
 ## Troubleshooting
 
 If the target is rejected, remove URL syntax, brackets, whitespace, credentials, and port syntax. If the hostname cannot be resolved, verify DNS and try the authorized literal address if appropriate. If a scan appears slow, reduce the range or timeout; filtered ports commonly consume the connection timeout. If another scan is active, wait for it to reach a terminal state before starting a new one.
+

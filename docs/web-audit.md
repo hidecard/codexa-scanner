@@ -42,3 +42,4 @@ Findings include severity, evidence, and remediation guidance. Grade and risk sc
 ## Troubleshooting and limits
 
 A connection or TLS error may indicate DNS failure, blocked scope, a certificate problem, timeout, or a remote refusal. Read the displayed error and confirm the URL scheme and authorization. A private target requires the explicit opt-in. Main/inspector/script response bodies are bounded samples. CSP parsing is best-effort and directive-oriented. Client-side scanning is capped (first-party scripts/count/size), same-origin for script/sourcemap probing, and pattern-based; it can miss obfuscated or dynamically loaded code and can produce false positives. A clean result means only that these bounded checks observed no issue; it does not mean the site is secure.
+

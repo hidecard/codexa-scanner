@@ -21,3 +21,4 @@ RDAP data is sourced from an external service and is registry metadata. It is no
 ## Troubleshooting and limits
 
 If the domain is rejected, remove the scheme, path, credentials, and IP address. If one record family fails, other families may still be returned. Resolver timeouts and DNSSEC/provider behavior can produce partial results. RDAP is optional, contacts an external service only for public addresses, and may be unavailable or omit fields. Use the smallest authorized domain scope and avoid treating stale records as current infrastructure proof.
+

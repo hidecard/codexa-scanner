@@ -36,3 +36,4 @@ Options:
 - `2`: invalid CLI arguments, invalid/out-of-scope target, request error, or report output error.
 
 A finding is a bounded heuristic and must be reviewed in context. Use this command only for systems you own or have explicit authorization to assess. Network requests may be logged or trigger defensive controls. The CLI does not ask interactively for authorization; `--allow-private` is an explicit one-run opt-in for private/lab destinations.
+

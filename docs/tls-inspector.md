@@ -28,3 +28,4 @@ If HTTP/2 is not negotiated, the endpoint may not advertise `h2`, may prefer HTT
 ## Limits
 
 The inspector reports the certificate presented by the selected endpoint and the local system’s trust decision. It checks a fixed list of legacy TLS 1.2 suites and does not enumerate every cipher combination, perform a QUIC handshake, or prove that a service is free of TLS weaknesses. HTTP/3 is only reported when advertised by the HTTPS response’s `Alt-Svc` header.
+

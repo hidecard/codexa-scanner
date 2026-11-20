@@ -24,3 +24,4 @@ The passive lookup contacts crt.sh. Wordlist mode generates DNS traffic to candi
 ## Troubleshooting
 
 If the domain is rejected, enter only the bare ASCII domain name and remove a scheme or trailing path. If crt.sh is unavailable, the module reports an error and may return no CT names; retry later. If DNS wordlist results are empty, verify that the labels are valid and that the authoritative DNS service answers those names.
+
