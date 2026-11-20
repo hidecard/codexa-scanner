@@ -215,6 +215,9 @@ func openScanHistory(path string) (*sql.DB, error) {
 			ON finding_notes(history_id)`)
 	}
 	if err == nil {
+		err = ensureCVEFeedTable(db)
+	}
+	if err == nil {
 		err = db.Ping()
 	}
 	if err != nil {

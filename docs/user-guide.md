@@ -48,8 +48,8 @@ History is stored in the operating system user configuration directory under `Co
 
 If a target is rejected, use the input format documented by that feature and remove unapproved URL syntax, credentials, or port values. If HTTP analysis fails, check the URL scheme, authorization, redirect scope, certificate trust, and private/lab option. `Inconclusive` TLS 1.0/1.1 results can be caused by local crypto policy, timeouts, or network errors and are not proof that the protocol is supported. If history is unavailable, scan modules remain usable but history-dependent views may be empty. Reports are indicators for review, not CVSS scores or proof of exploitability.
 
-## 8. Releases and installer verification (v1.1.4)
+## 8. Releases and installer verification (v1.1.5)
 
 - GitHub releases (tags `v*`) produce Linux `.deb`, Windows `.exe`, and macOS Intel/Apple Silicon `.dmg` artifacts via `.github/workflows/build.yml` (see [Release & Installer Verification](release-verification.md)).
 - CI hardening: workflow permissions are least-privilege (`contents: read`, release job only `contents: write`), Linux CI runs `go test -race ./...` + `go vet ./...`, Windows CI runs `go test ./...` + `go vet ./...`, and frontend dependencies are pinned to exact versions with a committed lockfile.
-- Clean-machine install/upgrade/uninstall and SQLite history data-retention checks for v1.1.4 artifacts must be performed on fresh systems and recorded per [Release & Installer Verification](release-verification.md).
+- Clean-machine install/upgrade/uninstall and SQLite history data-retention checks for v1.1.5 artifacts must be performed on fresh systems and recorded per [Release & Installer Verification](release-verification.md).

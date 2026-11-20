@@ -2078,5 +2078,56 @@ export namespace main {
 		}
 	}
 
+	export class CVEFeedSyncResult {
+	    fetched: number;
+	    stored: number;
+	    cisaKev: number;
+	    nvdRecent: number;
+	    completedAt: any;
+	    warnings?: string[];
+	    usedCacheOnly: boolean;
+	    static createFrom(source: any = {}) { return new CVEFeedSyncResult(source); }
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fetched = source["fetched"];
+	        this.stored = source["stored"];
+	        this.cisaKev = source["cisaKev"];
+	        this.nvdRecent = source["nvdRecent"];
+	        this.completedAt = source["completedAt"];
+	        this.warnings = source["warnings"];
+	        this.usedCacheOnly = source["usedCacheOnly"];
+	    }
+	}
+	export class ThreatFeedItem {
+	    cve: string;
+	    product: string;
+	    title: string;
+	    severity: string;
+	    cvss: number;
+	    description: string;
+	    publishedAt: any;
+	    source: string;
+	    kev: boolean;
+	    affectedVersion?: string;
+	    fixedVersion?: string;
+	    references?: string[];
+	    static createFrom(source: any = {}) { return new ThreatFeedItem(source); }
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cve = source["cve"];
+	        this.product = source["product"];
+	        this.title = source["title"];
+	        this.severity = source["severity"];
+	        this.cvss = source["cvss"];
+	        this.description = source["description"];
+	        this.publishedAt = source["publishedAt"];
+	        this.source = source["source"];
+	        this.kev = source["kev"];
+	        this.affectedVersion = source["affectedVersion"];
+	        this.fixedVersion = source["fixedVersion"];
+	        this.references = source["references"];
+	    }
+	}
+
 }
 

@@ -50,6 +50,8 @@ export function GetFindingNotes(arg1:number):Promise<Array<main.FindingNote>>;
 
 export function GetFindingTags(arg1:number):Promise<Array<main.FindingTag>>;
 
+export function GetLatestThreatFeed(arg1:number):Promise<Array<main.ThreatFeedItem>>;
+
 export function GetRemediationKnowledge():Promise<main.RemediationKnowledge>;
 
 export function GetScanHistory(arg1:number):Promise<Array<main.HistoryEntry>>;
@@ -95,5 +97,7 @@ export function StartCIDRSweep(arg1:string,arg2:number,arg3:number,arg4:number,a
 export function StartPortScan(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:boolean):Promise<string>;
 
 export function StopPortScan():Promise<void>;
+
+export function SyncLatestCVEs():Promise<main.CVEFeedSyncResult>;
 
 export function UpdateHistoryWorkspace(arg1:number,arg2:number):Promise<void>;

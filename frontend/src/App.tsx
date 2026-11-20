@@ -41,6 +41,8 @@ import {
   ImportSubdomainsToWorkspace,
   InspectHTTP,
   ReplayHTTPRequest,
+  SyncLatestCVEs,
+  GetLatestThreatFeed,
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
@@ -378,6 +380,11 @@ export default function App() {
   const [newNote, setNewNote] = useState('');
   const [tagNoteHistoryID, setTagNoteHistoryID] = useState<number | null>(null);
   const [tagNoteFindingID, setTagNoteFindingID] = useState<string>('');
+  const [threatFeed, setThreatFeed] = useState<main.ThreatFeedItem[]>([]);
+  const [threatFeedDays, setThreatFeedDays] = useState(7);
+  const [isThreatFeedBusy, setIsThreatFeedBusy] = useState(false);
+  const [threatFeedStatus, setThreatFeedStatus] = useState('');
+  const [threatFeedError, setThreatFeedError] = useState('');
 
   const errorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
@@ -460,6 +467,16 @@ export default function App() {
   useEffect(() => {
     void (async () => { try { setRemediationKB(await GetRemediationKnowledge()); } catch {} })();
   }, []);
+  const refreshThreatFeed = async (days = threatFeedDays) => {
+    try { setThreatFeed(await GetLatestThreatFeed(days)); setThreatFeedError(''); } catch (error) { setThreatFeedError(errorMessage(error, 'Unable to load local CVE cache.')); }
+  };
+  const syncThreatFeed = async () => {
+    setIsThreatFeedBusy(true); setThreatFeedStatus('Syncing CISA KEV and NVD…'); setThreatFeedError('');
+    try { const result = await SyncLatestCVEs(); await refreshThreatFeed(threatFeedDays); setThreatFeedStatus(`${result.stored} CVEs cached locally${result.warnings?.length ? ` · ${result.warnings.length} source warning(s)` : ''}`); }
+    catch (error) { await refreshThreatFeed(threatFeedDays); setThreatFeedStatus('Using existing local cache (remote sync unavailable).'); setThreatFeedError(errorMessage(error, 'Feed sync failed; bundled advisory data and local cache remain active.')); }
+    finally { setIsThreatFeedBusy(false); }
+  };
+  useEffect(() => { void refreshThreatFeed(7); }, []);
 
   useEffect(() => {
     void (async () => {
@@ -1177,6 +1194,12 @@ ${rows || '<p>No results.</p>'}
             }
           }
           const totalFindings = Object.values(httpSeverity).reduce((a, b) => a + b, 0);
+          const scannedStackText = httpResults.flatMap((r) => (r.technologies || []).concat(r.edgeServices || [])).join(' ').toLowerCase();
+          const matchedFeedTargets = (item: main.ThreatFeedItem) => {
+            const product = (item.product || '').toLowerCase().replace(/[-_]/g, ' ');
+            if (!product || !scannedStackText) return 0;
+            return httpResults.filter((r) => (r.technologies || []).concat(r.edgeServices || []).join(' ').toLowerCase().includes(product)).length;
+          };
           const hasData = historyEntries.length > 0 || httpResults.length > 0 || findings.length > 0;
           const exportHistoryJSON = () => void ExportJSON('scan_history.json', JSON.stringify(historyEntries));
           const exportHistoryPDF = () => void ExportPDF('scan_history.pdf', JSON.stringify(historyEntries));
@@ -1189,6 +1212,28 @@ ${rows || '<p>No results.</p>'}
           );
           return (
             <div className="space-y-4">
+              <div className="rounded-xl border border-cyan-900/70 bg-slate-900 p-4 space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-cyan-200">Latest Threat &amp; CVE Feed</h3>
+                    <p className="mt-1 text-xs text-slate-400">Opt-in only. CISA KEV + recent NVD Critical/High CVEs are cached in local SQLite for offline use.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <select value={threatFeedDays} onChange={(e) => { const d = Number(e.target.value); setThreatFeedDays(d); void refreshThreatFeed(d); }} className="min-h-10 rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs text-slate-300"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select>
+                    <button onClick={() => void syncThreatFeed()} disabled={isThreatFeedBusy} className="min-h-10 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">{isThreatFeedBusy ? 'Syncing…' : 'Sync Latest CVEs'}</button>
+                  </div>
+                </div>
+                {threatFeedStatus && <p className="text-xs text-cyan-300">{threatFeedStatus}</p>}
+                {threatFeedError && <p className="rounded border border-amber-800 bg-amber-950/30 px-2 py-2 text-xs text-amber-300">{threatFeedError}</p>}
+                {threatFeed.length ? <div className="grid gap-2 md:grid-cols-2">
+                  {threatFeed.slice(0, 6).map((item) => <div key={`${item.cve}-${item.source}`} className="rounded-lg bg-slate-950 p-3">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]"><span className="font-mono text-cyan-300">{item.cve}</span>{item.kev && <span className="rounded bg-rose-950 px-1.5 py-0.5 font-semibold text-rose-300">KEV Active</span>}{matchedFeedTargets(item) > 0 && <span className="rounded bg-amber-950 px-1.5 py-0.5 font-semibold text-amber-300">Affects Your Scanned Assets ({matchedFeedTargets(item)} target{matchedFeedTargets(item) === 1 ? '' : 's'})</span>}<span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-300">{item.severity}{item.cvss ? ` · CVSS ${item.cvss}` : ''}</span></div>
+                    <div className="mt-1 text-xs font-semibold text-slate-200">{item.product || 'Multiple products'} · {item.title}</div>
+                    <div className="mt-1 line-clamp-2 text-[11px] text-slate-500">{item.description}</div>
+                  </div>)}
+                </div> : <p className="text-xs text-slate-500">No cached feed yet. Click “Sync Latest CVEs” when you want to contact the official feeds.</p>}
+              </div>
+
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -2751,7 +2796,7 @@ ${rows || '<p>No results.</p>'}
               <div>
                 <h2 className="text-xl font-bold tracking-[0.14em] text-emerald-400">CODEXA SCANNER</h2>
                 <p className="text-sm text-slate-400">Authorized Network & Web Security Assessment</p>
-                <p className="text-xs text-slate-500 mt-1">Version 1.1.4</p>
+                <p className="text-xs text-slate-500 mt-1">Version 1.1.5</p>
               </div>
             </div>
             <hr className="border-slate-800" />

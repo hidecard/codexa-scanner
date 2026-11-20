@@ -119,6 +119,9 @@ func loadCustomRules(path string) (*CustomRulesFile, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to read custom rules file: cannot find the file %q", path)
+		}
 		return nil, fmt.Errorf("failed to read custom rules file: %w", err)
 	}
 	// File size limit: 100KB
@@ -673,6 +676,7 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.historyDB = db
+	loadCachedFeedAdvisories(db)
 }
 
 func (a *App) shutdown(context.Context) {

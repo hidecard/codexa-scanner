@@ -98,6 +98,10 @@ export function GetFindingTags(arg1) {
   return window['go']['main']['App']['GetFindingTags'](arg1);
 }
 
+export function GetLatestThreatFeed(arg1) {
+  return window['go']['main']['App']['GetLatestThreatFeed'](arg1);
+}
+
 export function GetRemediationKnowledge() {
   return window['go']['main']['App']['GetRemediationKnowledge']();
 }
@@ -188,6 +192,10 @@ export function StartPortScan(arg1, arg2, arg3, arg4, arg5, arg6) {
 
 export function StopPortScan() {
   return window['go']['main']['App']['StopPortScan']();
+}
+
+export function SyncLatestCVEs() {
+  return window['go']['main']['App']['SyncLatestCVEs']();
 }
 
 export function UpdateHistoryWorkspace(arg1, arg2) {
