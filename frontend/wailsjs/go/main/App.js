@@ -90,12 +90,20 @@ export function FuzzPaths(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) 
   return window['go']['main']['App']['FuzzPaths'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
+export function GetCachedCVEFeed(arg1, arg2) {
+  return window['go']['main']['App']['GetCachedCVEFeed'](arg1, arg2);
+}
+
 export function GetFindingNotes(arg1) {
   return window['go']['main']['App']['GetFindingNotes'](arg1);
 }
 
 export function GetFindingTags(arg1) {
   return window['go']['main']['App']['GetFindingTags'](arg1);
+}
+
+export function GetHistoryDBPath() {
+  return window['go']['main']['App']['GetHistoryDBPath']();
 }
 
 export function GetLatestThreatFeed(arg1) {
@@ -150,6 +158,10 @@ export function InspectTLS(arg1) {
   return window['go']['main']['App']['InspectTLS'](arg1);
 }
 
+export function IsHistoryDBReady() {
+  return window['go']['main']['App']['IsHistoryDBReady']();
+}
+
 export function IsScansPaused() {
   return window['go']['main']['App']['IsScansPaused']();
 }
@@ -196,6 +208,10 @@ export function StopPortScan() {
 
 export function SyncLatestCVEs() {
   return window['go']['main']['App']['SyncLatestCVEs']();
+}
+
+export function SyncLiveCVEFeed(arg1) {
+  return window['go']['main']['App']['SyncLiveCVEFeed'](arg1);
 }
 
 export function UpdateHistoryWorkspace(arg1, arg2) {

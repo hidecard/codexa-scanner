@@ -43,11 +43,15 @@ import {
   ReplayHTTPRequest,
   SyncLatestCVEs,
   GetLatestThreatFeed,
+  SyncLiveCVEFeed,
+  GetCachedCVEFeed,
+  GetHistoryDBPath,
+  IsHistoryDBReady,
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
-type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about';
+type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about' | 'cvefeed';
 type GuideLang = 'en' | 'my';
 
 function shellQuote(value: string): string {
@@ -385,6 +389,16 @@ export default function App() {
   const [isThreatFeedBusy, setIsThreatFeedBusy] = useState(false);
   const [threatFeedStatus, setThreatFeedStatus] = useState('');
   const [threatFeedError, setThreatFeedError] = useState('');
+  const [isHistoryDBReady, setIsHistoryDBReady] = useState(false);
+
+  // CVE Feed Tab State
+  const [cveFeedSummary, setCVEFeedSummary] = useState<main.CVEFeedSummary | null>(null);
+  const [cveFeedFilter, setCVEFeedFilter] = useState<'ALL' | 'KEV' | 'CRITICAL' | 'AFFECTED'>('ALL');
+  const [cveFeedSearch, setCVEFeedSearch] = useState('');
+  const [isCVEFeedLoading, setIsCVEFeedLoading] = useState(false);
+  const [cveFeedError, setCVEFeedError] = useState('');
+  const [cveFeedLastSynced, setCVEFeedLastSynced] = useState('');
+  const [cveFeedStatus, setCVEFeedStatus] = useState('');
 
   const errorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
@@ -468,15 +482,78 @@ export default function App() {
     void (async () => { try { setRemediationKB(await GetRemediationKnowledge()); } catch {} })();
   }, []);
   const refreshThreatFeed = async (days = threatFeedDays) => {
-    try { setThreatFeed(await GetLatestThreatFeed(days)); setThreatFeedError(''); } catch (error) { setThreatFeedError(errorMessage(error, 'Unable to load local CVE cache.')); }
+    try { 
+      const feed = await GetLatestThreatFeed(days); 
+      setThreatFeed(feed); 
+      setThreatFeedError('');
+      setIsHistoryDBReady(true);
+    } catch (error) { 
+      const msg = errorMessage(error, 'Unable to load local CVE cache.');
+      setThreatFeedError(msg);
+      setIsHistoryDBReady(!msg.includes('SQLite cache is not available'));
+    }
   };
   const syncThreatFeed = async () => {
+    if (!isHistoryDBReady) {
+      setThreatFeedError('Local SQLite database is not ready. Please wait for initialization or check application logs.');
+      return;
+    }
     setIsThreatFeedBusy(true); setThreatFeedStatus('Syncing CISA KEV and NVD…'); setThreatFeedError('');
-    try { const result = await SyncLatestCVEs(); await refreshThreatFeed(threatFeedDays); setThreatFeedStatus(`${result.stored} CVEs cached locally${result.warnings?.length ? ` · ${result.warnings.length} source warning(s)` : ''}`); }
+    try { 
+      const result = await SyncLatestCVEs(); 
+      await refreshThreatFeed(threatFeedDays); 
+      if (result.usedCacheOnly) {
+        const warningMsg = result.warnings?.length ? ` · ${result.warnings.join('; ')}` : '';
+        setThreatFeedStatus(`Using existing local cache (remote sync unavailable)${warningMsg}`);
+      } else {
+        setThreatFeedStatus(`${result.stored} CVEs cached locally${result.warnings?.length ? ` · ${result.warnings.length} source warning(s)` : ''}`);
+      }
+    }
     catch (error) { await refreshThreatFeed(threatFeedDays); setThreatFeedStatus('Using existing local cache (remote sync unavailable).'); setThreatFeedError(errorMessage(error, 'Feed sync failed; bundled advisory data and local cache remain active.')); }
     finally { setIsThreatFeedBusy(false); }
   };
   useEffect(() => { void refreshThreatFeed(7); }, []);
+
+  const loadCVEFeed = async () => {
+    setIsCVEFeedLoading(true);
+    setCVEFeedError('');
+    try {
+      const summary = await GetCachedCVEFeed(cveFeedFilter, cveFeedFilter === 'AFFECTED');
+      setCVEFeedSummary(summary);
+      if (summary.lastSyncedAt) {
+        const d = new Date(summary.lastSyncedAt);
+        setCVEFeedLastSynced(d.toLocaleString());
+      }
+      setCVEFeedStatus(`Loaded ${summary.totalCached} CVEs from local cache (${summary.kevCount} KEV, ${summary.affectedCount} affecting your assets)`);
+    } catch (error) {
+      setCVEFeedError(errorMessage(error, 'Failed to load CVE feed'));
+    } finally {
+      setIsCVEFeedLoading(false);
+    }
+  };
+
+  const syncCVEFeed = async () => {
+    setIsCVEFeedLoading(true);
+    setCVEFeedStatus('Syncing CISA KEV and NVD…');
+    setCVEFeedError('');
+    try {
+      const summary = await SyncLiveCVEFeed('');
+      setCVEFeedSummary(summary);
+      if (summary.lastSyncedAt) {
+        const d = new Date(summary.lastSyncedAt);
+        setCVEFeedLastSynced(d.toLocaleString());
+      }
+      if (summary.syncError) {
+        setCVEFeedStatus(`Sync completed with warnings: ${summary.syncError}`);
+      } else {
+        setCVEFeedStatus(`Synced ${summary.totalCached} CVEs (${summary.kevCount} KEV, ${summary.affectedCount} affecting your assets)`);
+      }
+    } catch (error) {
+      setCVEFeedError(errorMessage(error, 'Sync failed'));
+    } finally {
+      setIsCVEFeedLoading(false);
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -1136,7 +1213,7 @@ ${rows || '<p>No results.</p>'}
             Web Audit
           </button>
           {([
-            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'], ['workspaces', 'Workspaces'], ['import', 'Import'], ['inspector', 'Inspector'], ['about', 'About'],
+            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'], ['workspaces', 'Workspaces'], ['import', 'Import'], ['inspector', 'Inspector'], ['about', 'About'], ['cvefeed', 'CVE Feed'],
           ] as const).map(([tab, label]) => (
             <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab as ActiveTab); if (tab === 'history') void refreshHistory(); if (tab === 'workspaces') void loadWorkspaces(); }}
               className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
@@ -1210,30 +1287,8 @@ ${rows || '<p>No results.</p>'}
               {note ? <div className="mt-1 text-xs text-slate-400">{note}</div> : null}
             </div>
           );
-          return (
+return (
             <div className="space-y-4">
-              <div className="rounded-xl border border-cyan-900/70 bg-slate-900 p-4 space-y-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-cyan-200">Latest Threat &amp; CVE Feed</h3>
-                    <p className="mt-1 text-xs text-slate-400">Opt-in only. CISA KEV + recent NVD Critical/High CVEs are cached in local SQLite for offline use.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <select value={threatFeedDays} onChange={(e) => { const d = Number(e.target.value); setThreatFeedDays(d); void refreshThreatFeed(d); }} className="min-h-10 rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs text-slate-300"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select>
-                    <button onClick={() => void syncThreatFeed()} disabled={isThreatFeedBusy} className="min-h-10 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">{isThreatFeedBusy ? 'Syncing…' : 'Sync Latest CVEs'}</button>
-                  </div>
-                </div>
-                {threatFeedStatus && <p className="text-xs text-cyan-300">{threatFeedStatus}</p>}
-                {threatFeedError && <p className="rounded border border-amber-800 bg-amber-950/30 px-2 py-2 text-xs text-amber-300">{threatFeedError}</p>}
-                {threatFeed.length ? <div className="grid gap-2 md:grid-cols-2">
-                  {threatFeed.slice(0, 6).map((item) => <div key={`${item.cve}-${item.source}`} className="rounded-lg bg-slate-950 p-3">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]"><span className="font-mono text-cyan-300">{item.cve}</span>{item.kev && <span className="rounded bg-rose-950 px-1.5 py-0.5 font-semibold text-rose-300">KEV Active</span>}{matchedFeedTargets(item) > 0 && <span className="rounded bg-amber-950 px-1.5 py-0.5 font-semibold text-amber-300">Affects Your Scanned Assets ({matchedFeedTargets(item)} target{matchedFeedTargets(item) === 1 ? '' : 's'})</span>}<span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-300">{item.severity}{item.cvss ? ` · CVSS ${item.cvss}` : ''}</span></div>
-                    <div className="mt-1 text-xs font-semibold text-slate-200">{item.product || 'Multiple products'} · {item.title}</div>
-                    <div className="mt-1 line-clamp-2 text-[11px] text-slate-500">{item.description}</div>
-                  </div>)}
-                </div> : <p className="text-xs text-slate-500">No cached feed yet. Click “Sync Latest CVEs” when you want to contact the official feeds.</p>}
-              </div>
-
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -2358,12 +2413,16 @@ ${rows || '<p>No results.</p>'}
             <input autoFocus value={paletteQuery} onChange={(e)=>setPaletteQuery(e.target.value)} placeholder="Go to module or action... (Ctrl/Cmd+K)" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
             <div className="mt-2 max-h-72 space-y-1 overflow-auto">
               {(([
-                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],['Workspaces','workspaces'],['Import','import'],['Inspector','inspector'],['About','about'],
+                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],['Workspaces','workspaces'],['Import','import'],['Inspector','inspector'],['About','about'],['CVE Feed','cvefeed'],
               ] as [string,ActiveTab][]).filter(([l])=>l.toLowerCase().includes(paletteQuery.toLowerCase()))).map(([label,tab])=>(
                 <button key={tab} type="button" onClick={()=>{ setActiveTab(tab); if(tab==='history') void refreshHistory(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{label} <span className="text-xs text-slate-500">module</span></button>
               ))}
               <button type="button" onClick={()=>{ void refreshHistory(); setActiveTab('history'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Refresh History <span className="text-xs text-slate-500">action</span></button>
               <button type="button" onClick={()=>{ void togglePause(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{isPaused?'Resume scans':'Pause scans'} <span className="text-xs text-slate-500">action</span></button>
+              <hr className="border-slate-800 my-1" />
+              <span className="px-3 py-1 text-[11px] text-slate-500">CVE Feed</span>
+              <button type="button" onClick={()=>{ setActiveTab('cvefeed'); void loadCVEFeed(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Open CVE Feed <span className="text-xs text-slate-500">module</span></button>
+              <button type="button" onClick={()=>{ void syncCVEFeed(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Sync Live CVE Feed <span className="text-xs text-slate-500">action</span></button>
               <hr className="border-slate-800 my-1" />
               <span className="px-3 py-1 text-[11px] text-slate-500">Workspaces</span>
               <button type="button" onClick={()=>{ setActiveTab('workspaces'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Open Workspaces tab <span className="text-xs text-slate-500">action</span></button>
@@ -2886,6 +2945,94 @@ ${rows || '<p>No results.</p>'}
             <p>Built with: Go 1.22+, Wails v2, React 18, TypeScript, Vite, Tailwind CSS</p>
             <p>Licensed for authorized testing, education, and defensive security work.</p>
             <p>Repository: <a href="https://github.com/hidecard/codexa-scanner" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">github.com/hidecard/codexa-scanner</a></p>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* TAB: CVE FEED */}
+      {/* ========================================= */}
+      {activeTab === 'cvefeed' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-100">Live CVE Feed & Asset Correlation</h2>
+                <p className="text-xs text-slate-400">CISA KEV + NVD Critical/High CVEs cached locally. Matched against your scanned assets.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => void syncCVEFeed()} disabled={isCVEFeedLoading} className="min-h-10 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-600 disabled:opacity-50">{isCVEFeedLoading ? 'Syncing…' : 'Sync Now'}</button>
+                <button onClick={() => void loadCVEFeed()} disabled={isCVEFeedLoading} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Refresh</button>
+              </div>
+            </div>
+            {cveFeedLastSynced && <p className="text-xs text-cyan-300">Last synced: {cveFeedLastSynced}</p>}
+            {cveFeedStatus && <p className="text-xs text-emerald-300">{cveFeedStatus}</p>}
+            {cveFeedError && <p className="rounded border border-amber-800 bg-amber-950/30 px-2 py-2 text-xs text-amber-300">{cveFeedError}</p>}
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap gap-2">
+                {(['ALL', 'KEV', 'CRITICAL', 'AFFECTED'] as const).map((f) => (
+                  <button key={f} type="button" onClick={() => { setCVEFeedFilter(f); void loadCVEFeed(); }} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${cveFeedFilter === f ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'bg-slate-950 border border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
+                    {f === 'ALL' ? 'All Recent' : f === 'KEV' ? '⚠️ CISA Exploited' : f === 'CRITICAL' ? '🔴 Critical Only' : '🎯 Affects My Targets'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input type="text" value={cveFeedSearch} onChange={(e) => setCVEFeedSearch(e.target.value)} placeholder="Search CVE ID or product (nginx, wordpress...)" className="min-w-[250px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-300 outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+            {cveFeedSummary?.items && cveFeedSummary.items.length > 0 ? (
+              <>
+                <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded bg-emerald-950/50 px-2 py-1 text-emerald-300">Total: {cveFeedSummary.totalCached}</span>
+                  <span className="rounded bg-rose-950/50 px-2 py-1 text-rose-300">CISA KEV: {cveFeedSummary.kevCount}</span>
+                  <span className="rounded bg-amber-950/50 px-2 py-1 text-amber-300">Affects Your Assets: {cveFeedSummary.affectedCount}</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {cveFeedSummary.items
+                    .filter((item) => {
+                      if (!cveFeedSearch) return true;
+                      const search = cveFeedSearch.toLowerCase();
+                      return item.cveId.toLowerCase().includes(search) || item.product.toLowerCase().includes(search) || item.vendor.toLowerCase().includes(search) || item.title.toLowerCase().includes(search);
+                    })
+                    .slice(0, 50)
+                    .map((item) => (
+                      <div key={item.cveId} className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="font-mono text-cyan-300">{item.cveId}</span>
+                          {item.isKev && <span className="rounded bg-rose-950 px-1.5 py-0.5 font-semibold text-rose-300">KEV Active</span>}
+                          {item.matchedTargets?.length > 0 && <span className="rounded bg-amber-950 px-1.5 py-0.5 font-semibold text-amber-300">Affects {item.matchedTargets.length} Target{item.matchedTargets.length === 1 ? '' : 's'}</span>}
+                          <span className={`rounded bg-slate-800 px-1.5 py-0.5 text-slate-300 ${item.severity === 'CRITICAL' ? 'text-rose-300' : item.severity === 'HIGH' ? 'text-amber-300' : ''}`}>
+                            {item.severity}{item.cvssScore ? ` · CVSS ${item.cvssScore}` : ''}
+                          </span>
+                        </div>
+                        <div className="text-xs font-semibold text-slate-200">{item.vendor ? `${item.vendor} / ` : ''}{item.product}</div>
+                        <div className="text-xs text-slate-400 line-clamp-1">{item.title}</div>
+                        <div className="text-[11px] text-slate-500 line-clamp-2">{item.description}</div>
+                        {item.matchedTargets?.length > 0 && (
+                          <div className="text-[10px] text-emerald-300 font-mono">
+                            Affected: {item.matchedTargets?.slice(0, 3).join(', ')}{item.matchedTargets && item.matchedTargets.length > 3 ? ` +${item.matchedTargets.length - 3} more` : ''}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {item.references?.slice(0, 2).map((ref, idx) => (
+                            <button key={idx} type="button" onClick={() => void BrowserOpenURL(ref)} className="text-[10px] text-sky-400 hover:underline" title="Open reference">{new URL(ref).hostname}</button>
+                          ))}
+                          {item.references && item.references.length > 2 && <span className="text-[10px] text-slate-500">+{item.references.length - 2} more</span>}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+                {cveFeedSummary.items.length > 50 && <p className="mt-3 text-xs text-slate-500 text-center">Showing 50 of {cveFeedSummary.items.length} entries. Use search to filter.</p>}
+              </>
+            ) : (
+              <p className="text-center text-xs text-slate-500 py-8">No CVE feed data. Click "Sync Now" to fetch from CISA KEV and NVD, or "Refresh" to load local cache.</p>
+            )}
           </div>
         </div>
       )}

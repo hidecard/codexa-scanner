@@ -46,9 +46,13 @@ export function ExportText(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 
 export function FuzzPaths(arg1:string,arg2:Array<string>,arg3:number,arg4:number,arg5:number,arg6:number,arg7:string,arg8:number,arg9:string):Promise<main.PathFuzzResult>;
 
+export function GetCachedCVEFeed(arg1:string,arg2:boolean):Promise<main.CVEFeedSummary>;
+
 export function GetFindingNotes(arg1:number):Promise<Array<main.FindingNote>>;
 
 export function GetFindingTags(arg1:number):Promise<Array<main.FindingTag>>;
+
+export function GetHistoryDBPath():Promise<string>;
 
 export function GetLatestThreatFeed(arg1:number):Promise<Array<main.ThreatFeedItem>>;
 
@@ -76,6 +80,8 @@ export function InspectHTTP(arg1:main.HTTPInspectorRequest):Promise<main.HTTPIns
 
 export function InspectTLS(arg1:string):Promise<main.TLSInspection>;
 
+export function IsHistoryDBReady():Promise<boolean>;
+
 export function IsScansPaused():Promise<boolean>;
 
 export function ListWorkspaces():Promise<Array<main.Workspace>>;
@@ -99,5 +105,7 @@ export function StartPortScan(arg1:string,arg2:number,arg3:number,arg4:number,ar
 export function StopPortScan():Promise<void>;
 
 export function SyncLatestCVEs():Promise<main.CVEFeedSyncResult>;
+
+export function SyncLiveCVEFeed(arg1:string):Promise<main.CVEFeedSummary>;
 
 export function UpdateHistoryWorkspace(arg1:number,arg2:number):Promise<void>;

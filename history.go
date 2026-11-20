@@ -178,6 +178,15 @@ func openScanHistory(path string) (*sql.DB, error) {
 		)`)
 	}
 	if err == nil {
+		// Migration: add workspace_id column if it doesn't exist (for existing databases)
+		_, err = db.Exec(`ALTER TABLE scan_history ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id) ON DELETE SET NULL`)
+		// Ignore "duplicate column name" error
+		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
+		err = nil
+	}
+	if err == nil {
 		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_scan_history_type_target_created
 			ON scan_history(scan_type, target, created_at DESC, id DESC)`)
 	}

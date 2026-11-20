@@ -660,23 +660,44 @@ const (
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	log.Println("Codexa Scanner: Starting up...")
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
 		return
 	}
+	log.Printf("Codexa Scanner: Config dir: %s", configDir)
 	dir := filepath.Join(configDir, "CodexaScanner")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
 		return
 	}
-	db, err := openScanHistory(filepath.Join(dir, "history.sqlite"))
+	log.Printf("Codexa Scanner: Data dir: %s", dir)
+	dbPath := filepath.Join(dir, "history.sqlite")
+	log.Printf("Codexa Scanner: Database path: %s", dbPath)
+	db, err := openScanHistory(dbPath)
 	if err != nil {
-		log.Printf("Codexa Scanner: local scan history unavailable: %v", err)
+		log.Printf("Codexa Scanner: local scan history unavailable at %s: %v", dbPath, err)
 		return
 	}
+	log.Println("Codexa Scanner: Database opened successfully")
 	a.historyDB = db
 	loadCachedFeedAdvisories(db)
+	log.Println("Codexa Scanner: Startup complete")
+}
+
+// GetHistoryDBPath returns the path to the SQLite database file for debugging.
+func (a *App) GetHistoryDBPath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(configDir, "CodexaScanner", "history.sqlite")
+}
+
+// IsHistoryDBReady returns whether the history database is initialized.
+func (a *App) IsHistoryDBReady() bool {
+	return a != nil && a.historyDB != nil
 }
 
 func (a *App) shutdown(context.Context) {

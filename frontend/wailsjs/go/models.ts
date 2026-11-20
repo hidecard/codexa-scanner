@@ -674,6 +674,126 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class CVEItem {
+	    cveId: string;
+	    source: string;
+	    vendor: string;
+	    product: string;
+	    title: string;
+	    description: string;
+	    severity: string;
+	    cvssScore: number;
+	    publishedDate: string;
+	    dueDate?: string;
+	    isKev: boolean;
+	    references: string[];
+	    matchedTargets: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CVEItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cveId = source["cveId"];
+	        this.source = source["source"];
+	        this.vendor = source["vendor"];
+	        this.product = source["product"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.severity = source["severity"];
+	        this.cvssScore = source["cvssScore"];
+	        this.publishedDate = source["publishedDate"];
+	        this.dueDate = source["dueDate"];
+	        this.isKev = source["isKev"];
+	        this.references = source["references"];
+	        this.matchedTargets = source["matchedTargets"];
+	    }
+	}
+	export class CVEFeedSummary {
+	    items: CVEItem[];
+	    totalCached: number;
+	    kevCount: number;
+	    affectedCount: number;
+	    lastSyncedAt: string;
+	    syncError?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CVEFeedSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], CVEItem);
+	        this.totalCached = source["totalCached"];
+	        this.kevCount = source["kevCount"];
+	        this.affectedCount = source["affectedCount"];
+	        this.lastSyncedAt = source["lastSyncedAt"];
+	        this.syncError = source["syncError"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CVEFeedSyncResult {
+	    fetched: number;
+	    stored: number;
+	    cisaKev: number;
+	    nvdRecent: number;
+	    // Go type: time
+	    completedAt: any;
+	    warnings?: string[];
+	    usedCacheOnly: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CVEFeedSyncResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fetched = source["fetched"];
+	        this.stored = source["stored"];
+	        this.cisaKev = source["cisaKev"];
+	        this.nvdRecent = source["nvdRecent"];
+	        this.completedAt = this.convertValues(source["completedAt"], null);
+	        this.warnings = source["warnings"];
+	        this.usedCacheOnly = source["usedCacheOnly"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	
 	
 	
@@ -1928,6 +2048,61 @@ export namespace main {
 		}
 	}
 	
+	export class ThreatFeedItem {
+	    cve: string;
+	    product: string;
+	    title: string;
+	    severity: string;
+	    cvss?: number;
+	    description: string;
+	    // Go type: time
+	    publishedAt: any;
+	    source: string;
+	    kev: boolean;
+	    vendor?: string;
+	    affectedVersion?: string;
+	    fixedVersion?: string;
+	    references?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ThreatFeedItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cve = source["cve"];
+	        this.product = source["product"];
+	        this.title = source["title"];
+	        this.severity = source["severity"];
+	        this.cvss = source["cvss"];
+	        this.description = source["description"];
+	        this.publishedAt = this.convertValues(source["publishedAt"], null);
+	        this.source = source["source"];
+	        this.kev = source["kev"];
+	        this.vendor = source["vendor"];
+	        this.affectedVersion = source["affectedVersion"];
+	        this.fixedVersion = source["fixedVersion"];
+	        this.references = source["references"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class WebAuditURLDiff {
 	    url: string;
 	    // Go type: time
@@ -2076,57 +2251,6 @@ export namespace main {
 		    }
 		    return a;
 		}
-	}
-
-	export class CVEFeedSyncResult {
-	    fetched: number;
-	    stored: number;
-	    cisaKev: number;
-	    nvdRecent: number;
-	    completedAt: any;
-	    warnings?: string[];
-	    usedCacheOnly: boolean;
-	    static createFrom(source: any = {}) { return new CVEFeedSyncResult(source); }
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.fetched = source["fetched"];
-	        this.stored = source["stored"];
-	        this.cisaKev = source["cisaKev"];
-	        this.nvdRecent = source["nvdRecent"];
-	        this.completedAt = source["completedAt"];
-	        this.warnings = source["warnings"];
-	        this.usedCacheOnly = source["usedCacheOnly"];
-	    }
-	}
-	export class ThreatFeedItem {
-	    cve: string;
-	    product: string;
-	    title: string;
-	    severity: string;
-	    cvss: number;
-	    description: string;
-	    publishedAt: any;
-	    source: string;
-	    kev: boolean;
-	    affectedVersion?: string;
-	    fixedVersion?: string;
-	    references?: string[];
-	    static createFrom(source: any = {}) { return new ThreatFeedItem(source); }
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.cve = source["cve"];
-	        this.product = source["product"];
-	        this.title = source["title"];
-	        this.severity = source["severity"];
-	        this.cvss = source["cvss"];
-	        this.description = source["description"];
-	        this.publishedAt = source["publishedAt"];
-	        this.source = source["source"];
-	        this.kev = source["kev"];
-	        this.affectedVersion = source["affectedVersion"];
-	        this.fixedVersion = source["fixedVersion"];
-	        this.references = source["references"];
-	    }
 	}
 
 }

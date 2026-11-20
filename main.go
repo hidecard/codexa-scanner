@@ -17,7 +17,9 @@ func main() {
 	if len(os.Args) > 1 {
 		os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
 	}
+	log.Println("Codexa Scanner: main() starting...")
 	app := NewApp()
+	log.Println("Codexa Scanner: app created, starting wails...")
 	err := wails.Run(&options.App{
 		Title:       "Codexa Scanner",
 		Width:       1200,
