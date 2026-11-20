@@ -34,8 +34,32 @@ export function DeleteWorkspace(arg1) {
   return window['go']['main']['App']['DeleteWorkspace'](arg1);
 }
 
+export function DiffLatestCIDRSweepScans(arg1) {
+  return window['go']['main']['App']['DiffLatestCIDRSweepScans'](arg1);
+}
+
+export function DiffLatestDNSIntelligenceScans(arg1) {
+  return window['go']['main']['App']['DiffLatestDNSIntelligenceScans'](arg1);
+}
+
+export function DiffLatestIPInformationScans(arg1) {
+  return window['go']['main']['App']['DiffLatestIPInformationScans'](arg1);
+}
+
+export function DiffLatestPathFuzzScans(arg1) {
+  return window['go']['main']['App']['DiffLatestPathFuzzScans'](arg1);
+}
+
 export function DiffLatestPortScans(arg1) {
   return window['go']['main']['App']['DiffLatestPortScans'](arg1);
+}
+
+export function DiffLatestSubdomainScans(arg1) {
+  return window['go']['main']['App']['DiffLatestSubdomainScans'](arg1);
+}
+
+export function DiffLatestTLSInspectionScans(arg1) {
+  return window['go']['main']['App']['DiffLatestTLSInspectionScans'](arg1);
 }
 
 export function DiffLatestWebAuditScans(arg1) {

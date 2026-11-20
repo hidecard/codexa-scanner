@@ -84,6 +84,174 @@ function verificationCommands(result: main.BulkHeaderResult): { label: string; c
   return commands;
 }
 
+// Finding Tags & Notes Component
+function FindingTagsNotes({ historyId, findingId }: { historyId: number; findingId: string }) {
+  const [tags, setTags] = useState<main.FindingTag[]>([]);
+  const [notes, setNotes] = useState<main.FindingNote[]>([]);
+  const [newTag, setNewTag] = useState('');
+  const [newNote, setNewNote] = useState('');
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [tagError, setTagError] = useState('');
+  const [noteError, setNoteError] = useState('');
+
+  useEffect(() => {
+    if (!historyId || !findingId) return;
+    loadTags();
+    loadNotes();
+  }, [historyId, findingId]);
+
+  const loadTags = async () => {
+    if (!historyId || !findingId) return;
+    setTagsLoading(true);
+    try {
+      const result = await GetFindingTags(historyId);
+      setTags(result || []);
+    } catch (e) {
+      setTagError('Failed to load tags');
+    } finally {
+      setTagsLoading(false);
+    }
+  };
+
+  const loadNotes = async () => {
+    if (!historyId || !findingId) return;
+    setNotesLoading(true);
+    try {
+      const result = await GetFindingNotes(historyId);
+      setNotes(result || []);
+    } catch (e) {
+      setNoteError('Failed to load notes');
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const handleAddTag = async () => {
+    if (!newTag.trim() || !historyId || !findingId) return;
+    setTagError('');
+    try {
+      await SetFindingTag(historyId, findingId, newTag.trim());
+      setNewTag('');
+      loadTags();
+    } catch (e) {
+      setTagError('Failed to add tag');
+    }
+  };
+
+  const handleDeleteTag = async (tag: string) => {
+    if (!historyId || !findingId) return;
+    setTagError('');
+    try {
+      await DeleteFindingTag(historyId, findingId);
+      loadTags();
+    } catch (e) {
+      setTagError('Failed to delete tag');
+    }
+  };
+
+  const handleAddNote = async () => {
+    if (!newNote.trim() || !historyId || !findingId) return;
+    setNoteError('');
+    try {
+      await SetFindingNote(historyId, findingId, newNote.trim());
+      setNewNote('');
+      loadNotes();
+    } catch (e) {
+      setNoteError('Failed to add note');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!historyId || !findingId) return;
+    setNoteError('');
+    try {
+      await DeleteFindingNote(historyId, findingId);
+      loadNotes();
+    } catch (e) {
+      setNoteError('Failed to delete note');
+    }
+  };
+
+  const tagOptions = ['Verified', 'False Positive', 'Needs Review', 'Accepted Risk'];
+
+  return (
+    <section className="rounded border border-slate-800 bg-slate-950/50 p-3 space-y-3">
+      <h4 className="font-semibold text-emerald-300 flex items-center gap-2">
+        Analyst Triage
+        <span className="text-[10px] text-slate-500">(persists in SQLite, included in reports)</span>
+      </h4>
+
+      {/* Tags */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span className="font-medium">Tags:</span>
+          {tags.length === 0 && <span className="text-slate-500">No tags yet</span>}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {tags.map((t) => (
+            <span key={t.id} className="inline-flex items-center gap-1 rounded bg-emerald-950/40 border border-emerald-800 px-2 py-1 text-xs text-emerald-300">
+              {t.tag}
+              <button onClick={() => handleDeleteTag(t.tag)} className="hover:text-rose-400" title="Delete tag">✕</button>
+            </span>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {tagOptions.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => { setNewTag(opt); handleAddTag(); }}
+              className={`rounded border px-2 py-1 text-xs ${tags.some(t => t.tag === opt) ? 'bg-emerald-950/40 border-emerald-600 text-emerald-300' : 'border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
+            placeholder="Custom tag..."
+            className="flex-1 min-w-[150px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          />
+          <button onClick={handleAddTag} disabled={tagsLoading || !newTag.trim()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">Add Tag</button>
+        </div>
+        {tagError && <p className="text-rose-400 text-xs">{tagError}</p>}
+      </div>
+
+      {/* Notes */}
+      <div className="space-y-2 pt-3 border-t border-slate-800">
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span className="font-medium">Notes:</span>
+          {notes.length === 0 && <span className="text-slate-500">No notes yet</span>}
+        </div>
+        <div className="space-y-1">
+          {notes.map((n) => (
+            <div key={n.id} className="relative rounded bg-slate-900 border border-slate-800 p-2">
+              <button onClick={() => handleDeleteNote(n.id)} className="absolute top-1 right-1 text-[10px] text-slate-500 hover:text-rose-400" title="Delete note">✕</button>
+              <div className="text-xs text-slate-500 mb-1">{new Date(n.createdAt).toLocaleString()}</div>
+              <p className="text-sm text-slate-200 whitespace-pre-wrap">{n.note}</p>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-1">
+          <textarea
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            placeholder="Add a note for this finding..."
+            rows={3}
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500 font-mono text-[11px]"
+          />
+          <button onClick={handleAddNote} disabled={notesLoading || !newNote.trim()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">Add Note</button>
+        </div>
+        {noteError && <p className="text-rose-400 text-xs">{noteError}</p>}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
@@ -175,6 +343,7 @@ export default function App() {
   const [playbookStack, setPlaybookStack] = useState('Next.js');
   const [playbookQuery, setPlaybookQuery] = useState('');
   const [findingDrawerId, setFindingDrawerId] = useState<string | null>(null);
+  const [findingDrawerHistoryId, setFindingDrawerHistoryId] = useState<number | null>(null);
   const selectedHistoryEntries = historyEntries.filter((entry) => selectedHistoryIds.includes(entry.id));
   const [detectedTechStack, setDetectedTechStack] = useState('Next.js');
 
@@ -323,9 +492,10 @@ export default function App() {
     if (techs.includes('supabase')) return 'Supabase';
     return 'Next.js';
   };
-  const openFindingGuide = (id: string, res?: main.BulkHeaderResult | null) => {
+  const openFindingGuide = (id: string, res?: main.BulkHeaderResult | null, historyId?: number) => {
     const stack = detectStackFromResult(res);
     setDetectedTechStack(stack); setPlaybookStack(stack); setFindingDrawerId(id);
+    if (historyId !== undefined) setFindingDrawerHistoryId(historyId);
   };
   const lookupGuide = (id: string | null) => {
     if (!id || !remediationKB?.entries) return null;
@@ -2185,7 +2355,7 @@ ${rows || '<p>No results.</p>'}
               {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
                 <div className="mt-4 space-y-4 text-sm">
                   {/* Finding Tags & Notes Section */}
-                  <FindingTagsNotes findingId={findingDrawerId} />
+                  <FindingTagsNotes historyId={findingDrawerHistoryId!} findingId={findingDrawerId!} />
                   <section className="rounded border border-slate-800 bg-slate-950/50 p-3"><div className="flex flex-wrap gap-2 text-xs"><span className="rounded bg-rose-950/60 px-2 py-1 text-rose-300">Severity: {g.severity || 'review'}</span><span className="rounded bg-sky-950/60 px-2 py-1 text-sky-300">Priority: {g.priority || 'P2'}</span><span className="rounded bg-amber-950/60 px-2 py-1 text-amber-300">Change risk: {g.changeRisk || 'unknown'}</span></div></section>
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Root cause</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'rootCause')}</p></section>

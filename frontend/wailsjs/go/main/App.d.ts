@@ -18,7 +18,19 @@ export function DeleteScanHistoryEntry(arg1:number):Promise<void>;
 
 export function DeleteWorkspace(arg1:number):Promise<void>;
 
+export function DiffLatestCIDRSweepScans(arg1:string):Promise<main.CIDRSweepDiff>;
+
+export function DiffLatestDNSIntelligenceScans(arg1:string):Promise<main.DNSIntelligenceDiff>;
+
+export function DiffLatestIPInformationScans(arg1:string):Promise<main.IPInformationDiff>;
+
+export function DiffLatestPathFuzzScans(arg1:string):Promise<main.PathFuzzDiff>;
+
 export function DiffLatestPortScans(arg1:string):Promise<main.PortScanDiff>;
+
+export function DiffLatestSubdomainScans(arg1:string):Promise<main.SubdomainDiff>;
+
+export function DiffLatestTLSInspectionScans(arg1:string):Promise<main.TLSInspectionDiff>;
 
 export function DiffLatestWebAuditScans(arg1:string):Promise<main.WebAuditDiff>;
 

@@ -628,6 +628,52 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class CIDRSweepDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    newHosts: string[];
+	    removedHosts: string[];
+	    newPorts: number[];
+	    removedPorts: number[];
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CIDRSweepDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.newHosts = source["newHosts"];
+	        this.removedHosts = source["removedHosts"];
+	        this.newPorts = source["newPorts"];
+	        this.removedPorts = source["removedPorts"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	
@@ -790,6 +836,48 @@ export namespace main {
 	        this.ruf = source["ruf"];
 	        this.alignment = this.convertValues(source["alignment"], Alignment);
 	        this.warnings = source["warnings"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DNSIntelligenceDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    newRecords: Record<string, Array<string>>;
+	    removedRecords: Record<string, Array<string>>;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DNSIntelligenceDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.newRecords = source["newRecords"];
+	        this.removedRecords = source["removedRecords"];
+	        this.note = source["note"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1179,6 +1267,62 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class IPInformationDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    asnChanged: boolean;
+	    previousASN?: string;
+	    latestASN?: string;
+	    countryChanged: boolean;
+	    previousCountry?: string;
+	    latestCountry?: string;
+	    orgChanged: boolean;
+	    previousOrg?: string;
+	    latestOrg?: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IPInformationDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.asnChanged = source["asnChanged"];
+	        this.previousASN = source["previousASN"];
+	        this.latestASN = source["latestASN"];
+	        this.countryChanged = source["countryChanged"];
+	        this.previousCountry = source["previousCountry"];
+	        this.latestCountry = source["latestCountry"];
+	        this.orgChanged = source["orgChanged"];
+	        this.previousOrg = source["previousOrg"];
+	        this.latestOrg = source["latestOrg"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class IPInformationResult {
 	    ip: string;
 	    addressClass: string;
@@ -1256,6 +1400,48 @@ export namespace main {
 	        this.statusCode = source["statusCode"];
 	        this.contentLength = source["contentLength"];
 	    }
+	}
+	export class PathFuzzDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    newPaths: string[];
+	    removedPaths: string[];
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PathFuzzDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.newPaths = source["newPaths"];
+	        this.removedPaths = source["removedPaths"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class PathFuzzResult {
 	    baseUrl: string;
@@ -1490,6 +1676,48 @@ export namespace main {
 	
 	
 	
+	export class SubdomainDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    newSubdomains: string[];
+	    removedSubdomains: string[];
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SubdomainDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.newSubdomains = source["newSubdomains"];
+	        this.removedSubdomains = source["removedSubdomains"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SubdomainImportResult {
 	    subdomainsLoaded: number;
 	    duplicatesRemoved: number;
@@ -1623,6 +1851,62 @@ export namespace main {
 	        this.http3Advertisement = source["http3Advertisement"];
 	        this.weakTls12Ciphers = source["weakTls12Ciphers"];
 	        this.weakCipherWarning = source["weakCipherWarning"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TLSInspectionDiff {
+	    target: string;
+	    // Go type: time
+	    latestAt?: any;
+	    // Go type: time
+	    previousAt?: any;
+	    certDaysDelta?: number;
+	    previousCertDays?: number;
+	    latestCertDays?: number;
+	    versionChanged: boolean;
+	    previousTLSVersion?: string;
+	    latestTLSVersion?: string;
+	    cipherSuiteChanged: boolean;
+	    previousCipherSuite?: string;
+	    latestCipherSuite?: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TLSInspectionDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.latestAt = this.convertValues(source["latestAt"], null);
+	        this.previousAt = this.convertValues(source["previousAt"], null);
+	        this.certDaysDelta = source["certDaysDelta"];
+	        this.previousCertDays = source["previousCertDays"];
+	        this.latestCertDays = source["latestCertDays"];
+	        this.versionChanged = source["versionChanged"];
+	        this.previousTLSVersion = source["previousTLSVersion"];
+	        this.latestTLSVersion = source["latestTLSVersion"];
+	        this.cipherSuiteChanged = source["cipherSuiteChanged"];
+	        this.previousCipherSuite = source["previousCipherSuite"];
+	        this.latestCipherSuite = source["latestCipherSuite"];
+	        this.note = source["note"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

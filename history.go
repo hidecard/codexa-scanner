@@ -63,6 +63,82 @@ type PortScanDiff struct {
 	RemovedPorts []int     `json:"removedPorts"`
 }
 
+// SubdomainDiff compares the two most recent subdomain enumeration snapshots for a target.
+type SubdomainDiff struct {
+	Target       string   `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	NewSubdomains     []string `json:"newSubdomains"`
+	RemovedSubdomains []string `json:"removedSubdomains"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// PathFuzzDiff compares the two most recent path fuzzing snapshots for a target.
+type PathFuzzDiff struct {
+	Target       string   `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	NewPaths     []string `json:"newPaths"`
+	RemovedPaths []string `json:"removedPaths"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// TLSInspectionDiff compares the two most recent TLS inspection snapshots for a target.
+type TLSInspectionDiff struct {
+	Target       string    `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	CertDaysDelta *int     `json:"certDaysDelta,omitempty"`
+	PreviousCertDays *int  `json:"previousCertDays,omitempty"`
+	LatestCertDays   *int  `json:"latestCertDays,omitempty"`
+	VersionChanged    bool `json:"versionChanged"`
+	PreviousTLSVersion string `json:"previousTLSVersion,omitempty"`
+	LatestTLSVersion   string `json:"latestTLSVersion,omitempty"`
+	CipherSuiteChanged bool `json:"cipherSuiteChanged"`
+	PreviousCipherSuite string `json:"previousCipherSuite,omitempty"`
+	LatestCipherSuite   string `json:"latestCipherSuite,omitempty"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// DNSIntelligenceDiff compares the two most recent DNS intelligence snapshots for a target.
+type DNSIntelligenceDiff struct {
+	Target       string   `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	NewRecords   map[string][]string `json:"newRecords"`
+	RemovedRecords map[string][]string `json:"removedRecords"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// IPInformationDiff compares the two most recent IP information snapshots for a target.
+type IPInformationDiff struct {
+	Target       string    `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	ASNChanged   bool      `json:"asnChanged"`
+	PreviousASN  string    `json:"previousASN,omitempty"`
+	LatestASN    string    `json:"latestASN,omitempty"`
+	CountryChanged bool    `json:"countryChanged"`
+	PreviousCountry string `json:"previousCountry,omitempty"`
+	LatestCountry   string `json:"latestCountry,omitempty"`
+	OrgChanged   bool      `json:"orgChanged"`
+	PreviousOrg  string    `json:"previousOrg,omitempty"`
+	LatestOrg    string    `json:"latestOrg,omitempty"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// CIDRSweepDiff compares the two most recent CIDR sweep snapshots for a target.
+type CIDRSweepDiff struct {
+	Target       string    `json:"target"`
+	LatestAt     time.Time `json:"latestAt,omitempty"`
+	PreviousAt   time.Time `json:"previousAt,omitempty"`
+	NewHosts     []string  `json:"newHosts"`
+	RemovedHosts []string  `json:"removedHosts"`
+	NewPorts     []int     `json:"newPorts"`
+	RemovedPorts []int     `json:"removedPorts"`
+	Note         string   `json:"note,omitempty"`
+}
+
 // openScanHistory opens (or creates) a SQLite history database and applies its schema.
 // SQLite is restricted to one connection to avoid unsafe concurrent writers and locks.
 func openScanHistory(path string) (*sql.DB, error) {
@@ -586,6 +662,402 @@ func (a *App) DiffLatestWebAuditScans(target string) WebAuditDiff {
 	return diff
 }
 
+// DiffLatestSubdomainScans compares the two most recent subdomain enumeration snapshots for a target.
+func (a *App) DiffLatestSubdomainScans(target string) SubdomainDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := SubdomainDiff{Target: normalized, NewSubdomains: []string{}, RemovedSubdomains: []string{}}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'subdomain' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable Subdomain snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	prevNames := toStringSet(latest.result["names"])
+	latestNames := toStringSet(previous.result["names"])
+	for v := range latestNames {
+		if _, ok := prevNames[v]; !ok {
+			diff.NewSubdomains = append(diff.NewSubdomains, v)
+		}
+	}
+	for v := range prevNames {
+		if _, ok := latestNames[v]; !ok {
+			diff.RemovedSubdomains = append(diff.RemovedSubdomains, v)
+		}
+	}
+	sort.Strings(diff.NewSubdomains)
+	sort.Strings(diff.RemovedSubdomains)
+	return diff
+}
+
+// DiffLatestPathFuzzScans compares the two most recent path fuzzing snapshots for a target.
+func (a *App) DiffLatestPathFuzzScans(target string) PathFuzzDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := PathFuzzDiff{Target: normalized, NewPaths: []string{}, RemovedPaths: []string{}}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'fuzzer' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable Path Fuzz snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	prevPaths := toStringSetFromPathFindings(previous.result["paths"])
+	latestPaths := toStringSetFromPathFindings(latest.result["paths"])
+	for v := range latestPaths {
+		if _, ok := prevPaths[v]; !ok {
+			diff.NewPaths = append(diff.NewPaths, v)
+		}
+	}
+	for v := range prevPaths {
+		if _, ok := latestPaths[v]; !ok {
+			diff.RemovedPaths = append(diff.RemovedPaths, v)
+		}
+	}
+	sort.Strings(diff.NewPaths)
+	sort.Strings(diff.RemovedPaths)
+	return diff
+}
+
+// DiffLatestTLSInspectionScans compares the two most recent TLS inspection snapshots for a target.
+func (a *App) DiffLatestTLSInspectionScans(target string) TLSInspectionDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := TLSInspectionDiff{Target: normalized}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'tls' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable TLS Inspection snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	prevDays := toIntValuePtr(previous.result["daysRemaining"])
+	latestDays := toIntValuePtr(latest.result["daysRemaining"])
+	if prevDays != nil && latestDays != nil {
+		delta := *latestDays - *prevDays
+		diff.CertDaysDelta = &delta
+		diff.PreviousCertDays = prevDays
+		diff.LatestCertDays = latestDays
+	}
+	prevVer := toStringValue(previous.result["tlsVersion"])
+	latestVer := toStringValue(latest.result["tlsVersion"])
+	if prevVer != latestVer {
+		diff.VersionChanged = true
+		diff.PreviousTLSVersion = prevVer
+		diff.LatestTLSVersion = latestVer
+	}
+	prevCipher := toStringValue(previous.result["cipherSuite"])
+	latestCipher := toStringValue(latest.result["cipherSuite"])
+	if prevCipher != latestCipher {
+		diff.CipherSuiteChanged = true
+		diff.PreviousCipherSuite = prevCipher
+		diff.LatestCipherSuite = latestCipher
+	}
+	return diff
+}
+
+// DiffLatestDNSIntelligenceScans compares the two most recent DNS intelligence snapshots for a target.
+func (a *App) DiffLatestDNSIntelligenceScans(target string) DNSIntelligenceDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := DNSIntelligenceDiff{Target: normalized, NewRecords: map[string][]string{}, RemovedRecords: map[string][]string{}}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'dns' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable DNS Intelligence snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	recordTypes := []string{"a", "aaaa", "mx", "ns", "txt", "spf", "dmarc", "ptr"}
+	for _, rt := range recordTypes {
+		prevVals := toStringSet(previous.result[rt])
+		latestVals := toStringSet(latest.result[rt])
+		for v := range latestVals {
+			if _, ok := prevVals[v]; !ok {
+				diff.NewRecords[rt] = append(diff.NewRecords[rt], v)
+			}
+		}
+		for v := range prevVals {
+			if _, ok := latestVals[v]; !ok {
+				diff.RemovedRecords[rt] = append(diff.RemovedRecords[rt], v)
+			}
+		}
+		if len(diff.NewRecords[rt]) > 0 {
+			sort.Strings(diff.NewRecords[rt])
+		}
+		if len(diff.RemovedRecords[rt]) > 0 {
+			sort.Strings(diff.RemovedRecords[rt])
+		}
+	}
+	return diff
+}
+
+// DiffLatestIPInformationScans compares the two most recent IP information snapshots for a target.
+func (a *App) DiffLatestIPInformationScans(target string) IPInformationDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := IPInformationDiff{Target: normalized}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'ip' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable IP Information snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	prevASN := toStringValue(previous.result["asn"])
+	latestASN := toStringValue(latest.result["asn"])
+	if prevASN != latestASN {
+		diff.ASNChanged = true
+		diff.PreviousASN = prevASN
+		diff.LatestASN = latestASN
+	}
+	prevCountry := toStringValue(previous.result["country"])
+	latestCountry := toStringValue(latest.result["country"])
+	if prevCountry != latestCountry {
+		diff.CountryChanged = true
+		diff.PreviousCountry = prevCountry
+		diff.LatestCountry = latestCountry
+	}
+	prevOrg := toStringValue(previous.result["org"])
+	latestOrg := toStringValue(latest.result["org"])
+	if prevOrg != latestOrg {
+		diff.OrgChanged = true
+		diff.PreviousOrg = prevOrg
+		diff.LatestOrg = latestOrg
+	}
+	return diff
+}
+
+// DiffLatestCIDRSweepScans compares the two most recent CIDR sweep snapshots for a target.
+func (a *App) DiffLatestCIDRSweepScans(target string) CIDRSweepDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := CIDRSweepDiff{Target: normalized, NewHosts: []string{}, RemovedHosts: []string{}, NewPorts: []int{}, RemovedPorts: []int{}}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'cidr-sweep' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable CIDR Sweep snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+	prevHosts := toStringSet(latest.result["hosts"])
+	latestHosts := toStringSet(previous.result["hosts"])
+	for v := range latestHosts {
+		if _, ok := prevHosts[v]; !ok {
+			diff.NewHosts = append(diff.NewHosts, v)
+		}
+	}
+	for v := range prevHosts {
+		if _, ok := latestHosts[v]; !ok {
+			diff.RemovedHosts = append(diff.RemovedHosts, v)
+		}
+	}
+	sort.Strings(diff.NewHosts)
+	sort.Strings(diff.RemovedHosts)
+	prevPorts := toIntSet(latest.result["ports"])
+	latestPorts := toIntSet(previous.result["ports"])
+	for v := range latestPorts {
+		if _, ok := prevPorts[v]; !ok {
+			diff.NewPorts = append(diff.NewPorts, v)
+		}
+	}
+	for v := range prevPorts {
+		if _, ok := latestPorts[v]; !ok {
+			diff.RemovedPorts = append(diff.RemovedPorts, v)
+		}
+	}
+	sort.Ints(diff.NewPorts)
+	sort.Ints(diff.RemovedPorts)
+	return diff
+}
+
 func toStringValue(v any) string {
 	s, _ := v.(string)
 	return s
@@ -650,4 +1122,57 @@ func tlsDaysRemaining(v any) (int, bool) {
 		return 0, false
 	}
 	return toIntValue(days), true
+}
+
+func toIntValuePtr(v any) *int {
+	switch n := v.(type) {
+	case float64:
+		i := int(n)
+		return &i
+	case int:
+		return &n
+	case int64:
+		i := int(n)
+		return &i
+	default:
+		return nil
+	}
+}
+
+func toStringSetFromPathFindings(v any) map[string]struct{} {
+	out := map[string]struct{}{}
+	arr, ok := v.([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		url := toStringValue(m["url"])
+		if url != "" {
+			out[url] = struct{}{}
+		}
+	}
+	return out
+}
+
+func toIntSet(v any) map[int]struct{} {
+	out := map[int]struct{}{}
+	arr, ok := v.([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range arr {
+		switch n := item.(type) {
+		case float64:
+			out[int(n)] = struct{}{}
+		case int:
+			out[n] = struct{}{}
+		case int64:
+			out[int(n)] = struct{}{}
+		}
+	}
+	return out
 }
