@@ -105,7 +105,7 @@ func writeCLIAuditReport(path string, results []BulkHeaderResult) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	_, report, err := prepareScanReportEnvelope("http_security_audit.json", string(data))
+	_, report, err := prepareScanReportEnvelope("http_security_audit.json", string(data), nil)
 	if err != nil {
 		return nil, err
 	}

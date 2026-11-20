@@ -528,6 +528,32 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class WAFDetection {
+	    name: string;
+	    category: string;
+	    headers?: string[];
+	    cookies?: string[];
+	    bodyMatches?: string[];
+	    statusCodes?: number[];
+	    confidence: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WAFDetection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.category = source["category"];
+	        this.headers = source["headers"];
+	        this.cookies = source["cookies"];
+	        this.bodyMatches = source["bodyMatches"];
+	        this.statusCodes = source["statusCodes"];
+	        this.confidence = source["confidence"];
+	        this.note = source["note"];
+	    }
+	}
 	export class RedirectHop {
 	    from: string;
 	    to: string;
@@ -555,6 +581,7 @@ export namespace main {
 	    poweredBy: string;
 	    technologies: string[];
 	    edgeServices: string[];
+	    wafDetections?: WAFDetection[];
 	    grade: string;
 	    riskScore: number;
 	    missing: string[];
@@ -590,6 +617,7 @@ export namespace main {
 	        this.poweredBy = source["poweredBy"];
 	        this.technologies = source["technologies"];
 	        this.edgeServices = source["edgeServices"];
+	        this.wafDetections = this.convertValues(source["wafDetections"], WAFDetection);
 	        this.grade = source["grade"];
 	        this.riskScore = source["riskScore"];
 	        this.missing = source["missing"];
@@ -2103,6 +2131,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	export class WebAuditURLDiff {
 	    url: string;
 	    // Go type: time

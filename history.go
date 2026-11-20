@@ -168,6 +168,43 @@ func openScanHistory(path string) (*sql.DB, error) {
 		)`)
 	}
 	if err == nil {
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspace_branding (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace_id INTEGER NOT NULL UNIQUE REFERENCES workspaces(id) ON DELETE CASCADE,
+			company_name TEXT,
+			auditor_name TEXT,
+			client_name TEXT,
+			logo_base64 TEXT,
+			logo_mime_type TEXT,
+			executive_summary_template TEXT,
+			custom_footer TEXT,
+			disclaimer TEXT,
+			version INTEGER NOT NULL DEFAULT 1,
+			updated_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scheduled_scans (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			scan_types TEXT NOT NULL, -- JSON array: ["port","http","dns","subdomain","tls"]
+			targets TEXT NOT NULL, -- JSON array of targets
+			schedule_cron TEXT NOT NULL, -- cron expression: "0 2 * * *" (daily 2am)
+			webhook_url TEXT,
+			webhook_type TEXT, -- "slack", "discord", "email"
+			last_run_at TEXT,
+			next_run_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_scheduled_scans_workspace ON scheduled_scans(workspace_id)`)
+	}
+	if err == nil {
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scan_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			scan_type TEXT NOT NULL,
@@ -717,8 +754,8 @@ func (a *App) DiffLatestSubdomainScans(target string) SubdomainDiff {
 	latest, previous := snaps[0], snaps[1]
 	diff.LatestAt = latest.at
 	diff.PreviousAt = previous.at
-	prevNames := toStringSet(latest.result["names"])
-	latestNames := toStringSet(previous.result["names"])
+	prevNames := toStringSet(previous.result["names"])
+	latestNames := toStringSet(latest.result["names"])
 	for v := range latestNames {
 		if _, ok := prevNames[v]; !ok {
 			diff.NewSubdomains = append(diff.NewSubdomains, v)
@@ -731,6 +768,154 @@ func (a *App) DiffLatestSubdomainScans(target string) SubdomainDiff {
 	}
 	sort.Strings(diff.NewSubdomains)
 	sort.Strings(diff.RemovedSubdomains)
+	return diff
+}
+
+// DiffLatestDNSScans compares the two most recent DNS intelligence snapshots for a target.
+func (a *App) DiffLatestDNSScans(target string) DNSIntelligenceDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := DNSIntelligenceDiff{Target: normalized, NewRecords: map[string][]string{}, RemovedRecords: map[string][]string{}}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'dns' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable DNS snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+
+	recordTypes := []string{"a", "aaaa", "mx", "ns", "txt", "spf", "dmarc"}
+	for _, rt := range recordTypes {
+		prevVals := toStringSet(previous.result[rt])
+		latestVals := toStringSet(latest.result[rt])
+		var newRecs, removedRecs []string
+		for v := range latestVals {
+			if _, ok := prevVals[v]; !ok {
+				newRecs = append(newRecs, v)
+			}
+		}
+		for v := range prevVals {
+			if _, ok := latestVals[v]; !ok {
+				removedRecs = append(removedRecs, v)
+			}
+		}
+		if len(newRecs) > 0 {
+			diff.NewRecords[rt] = newRecs
+		}
+		if len(removedRecs) > 0 {
+			diff.RemovedRecords[rt] = removedRecs
+		}
+	}
+	return diff
+}
+
+// DiffLatestTLSInspections compares the two most recent TLS inspection snapshots for a target.
+func (a *App) DiffLatestTLSInspections(target string) TLSInspectionDiff {
+	normalized := normalizeHistoryTarget(target)
+	diff := TLSInspectionDiff{Target: normalized}
+	if a == nil || a.historyDB == nil || normalized == "" {
+		return diff
+	}
+	rows, err := a.historyDB.Query(`SELECT result_json, created_at FROM scan_history
+		WHERE scan_type = 'tls' AND target = ? ORDER BY created_at DESC, id DESC LIMIT 2`, normalized)
+	if err != nil {
+		return diff
+	}
+	defer rows.Close()
+	type snap struct {
+		at     time.Time
+		result map[string]any
+	}
+	snaps := make([]snap, 0, 2)
+	for rows.Next() {
+		var raw, created string
+		if err := rows.Scan(&raw, &created); err != nil {
+			return diff
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return diff
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap{at: at, result: result})
+	}
+	if rows.Err() != nil || len(snaps) < 2 {
+		if len(snaps) == 1 {
+			diff.LatestAt = snaps[0].at
+			diff.Note = "Only one comparable TLS snapshot found for this target."
+		}
+		return diff
+	}
+	latest, previous := snaps[0], snaps[1]
+	diff.LatestAt = latest.at
+	diff.PreviousAt = previous.at
+
+	// Compare TLS versions
+	prevTLS := toStringValue(previous.result["tlsVersion"])
+	latestTLS := toStringValue(latest.result["tlsVersion"])
+	diff.PreviousTLSVersion = prevTLS
+	diff.LatestTLSVersion = latestTLS
+	if prevTLS != latestTLS {
+		diff.VersionChanged = true
+	}
+
+	// Compare cipher suites
+	prevCipher := toStringValue(previous.result["cipherSuite"])
+	latestCipher := toStringValue(latest.result["cipherSuite"])
+	diff.PreviousCipherSuite = prevCipher
+	diff.LatestCipherSuite = latestCipher
+	if prevCipher != latestCipher {
+		diff.CipherSuiteChanged = true
+	}
+
+	// Compare cert days remaining
+	prevDays, prevOK := tlsDaysRemaining(previous.result["tls"])
+	latestDays, latestOK := tlsDaysRemaining(latest.result["tls"])
+	if prevOK {
+		diff.PreviousCertDays = &prevDays
+	}
+	if latestOK {
+		diff.LatestCertDays = &latestDays
+	}
+	if prevOK && latestOK {
+		delta := latestDays - prevDays
+		diff.CertDaysDelta = &delta
+	}
+
 	return diff
 }
 

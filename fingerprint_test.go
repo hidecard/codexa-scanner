@@ -23,11 +23,11 @@ func TestFingerprintResponseTechnologyRules(t *testing.T) {
 		{"express cookie", &http.Response{Header: http.Header{"Set-Cookie": {"connect.sid=abc; Path=/"}}}, "", []string{"Express"}},
 		{"asp net header", &http.Response{Header: http.Header{"X-AspNet-Version": {"4.0"}}}, "", []string{"ASP.NET"}},
 		{"asp net cookie", &http.Response{Header: http.Header{"Set-Cookie": {"ASP.NET_SessionId=abc; Path=/"}}}, "", []string{"ASP.NET"}},
-		{"no evidence", &http.Response{Header: http.Header{"Server": {"Apache"}}}, "<html>ordinary page</html>", nil},
+		{"no evidence", &http.Response{Header: http.Header{"Server": {"Apache"}}}, "<html>ordinary page</html>", []string{"Apache"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := fingerprintResponse(tt.resp, []byte(tt.body))
+			got, _, _ := fingerprintResponse(tt.resp, []byte(tt.body))
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("technologies = %v, want %v", got, tt.want)
 			}
@@ -51,7 +51,7 @@ func TestFingerprintResponseEdgeRulesAndDeduplication(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, got := fingerprintResponse(tt.resp, nil)
+			_, got, _ := fingerprintResponse(tt.resp, nil)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("edge = %v, want %v", got, tt.want)
 			}
@@ -60,12 +60,12 @@ func TestFingerprintResponseEdgeRulesAndDeduplication(t *testing.T) {
 }
 
 func TestFingerprintResponseBoundsSampleAndHandlesNil(t *testing.T) {
-	if tech, edge := fingerprintResponse(nil, []byte(`/wp-content/`)); tech != nil || edge != nil {
+	if tech, edge, _ := fingerprintResponse(nil, []byte(`/wp-content/`)); tech != nil || edge != nil {
 		t.Fatalf("nil response yielded %v, %v", tech, edge)
 	}
 	resp := &http.Response{Header: http.Header{}}
 	body := append(make([]byte, 64*1024), []byte(`/wp-content/`)...)
-	tech, _ := fingerprintResponse(resp, body)
+	tech, _, _ := fingerprintResponse(resp, body)
 	if len(tech) != 0 {
 		t.Fatalf("fingerprint used content beyond sample limit: %v", tech)
 	}

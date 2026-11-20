@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   StartPortScan,
   StopPortScan,
@@ -54,6 +54,38 @@ import { main } from '../wailsjs/go/models';
 type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about' | 'cvefeed';
 type GuideLang = 'en' | 'my';
 
+type NavGroup = 'dashboard' | 'network' | 'web' | 'assessment' | 'reports' | 'settings';
+
+const NAV_GROUPS: Record<NavGroup, { label: string; tabs: { id: ActiveTab; label: string }[] }> = {
+  dashboard: { label: 'Dashboard', tabs: [{ id: 'dashboard', label: 'Dashboard' }] },
+  network: { label: 'Network Intelligence', tabs: [
+    { id: 'subdomains', label: 'Subdomains' },
+    { id: 'fuzzer', label: 'Path Fuzzer' },
+    { id: 'tls', label: 'TLS' },
+    { id: 'dns', label: 'DNS' },
+    { id: 'ip', label: 'IP Info' },
+  ] },
+  web: { label: 'Web Security', tabs: [
+    { id: 'analyzer', label: 'Web Audit' },
+    { id: 'inspector', label: 'Inspector' },
+  ] },
+  assessment: { label: 'Assessment', tabs: [
+    { id: 'scanner', label: 'Ports' },
+    { id: 'cvefeed', label: 'CVE Feed' },
+  ] },
+  reports: { label: 'Reports & History', tabs: [
+    { id: 'history', label: 'History' },
+    { id: 'playbook', label: 'Playbook' },
+  ] },
+  settings: { label: 'Settings', tabs: [
+    { id: 'workspaces', label: 'Workspaces' },
+    { id: 'import', label: 'Import' },
+    { id: 'about', label: 'About' },
+  ] },
+};
+
+const GROUP_ORDER: NavGroup[] = ['dashboard', 'network', 'web', 'assessment', 'reports', 'settings'];
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -90,176 +122,20 @@ function verificationCommands(result: main.BulkHeaderResult): { label: string; c
   return commands;
 }
 
-// Finding Tags & Notes Component
-function FindingTagsNotes({ historyId, findingId }: { historyId: number; findingId: string }) {
-  const [tags, setTags] = useState<main.FindingTag[]>([]);
-  const [notes, setNotes] = useState<main.FindingNote[]>([]);
-  const [newTag, setNewTag] = useState('');
-  const [newNote, setNewNote] = useState('');
-  const [tagsLoading, setTagsLoading] = useState(false);
-  const [notesLoading, setNotesLoading] = useState(false);
-  const [tagError, setTagError] = useState('');
-  const [noteError, setNoteError] = useState('');
-
-  useEffect(() => {
-    if (!historyId || !findingId) return;
-    loadTags();
-    loadNotes();
-  }, [historyId, findingId]);
-
-  const loadTags = async () => {
-    if (!historyId || !findingId) return;
-    setTagsLoading(true);
-    try {
-      const result = await GetFindingTags(historyId);
-      setTags(result || []);
-    } catch (e) {
-      setTagError('Failed to load tags');
-    } finally {
-      setTagsLoading(false);
-    }
-  };
-
-  const loadNotes = async () => {
-    if (!historyId || !findingId) return;
-    setNotesLoading(true);
-    try {
-      const result = await GetFindingNotes(historyId);
-      setNotes(result || []);
-    } catch (e) {
-      setNoteError('Failed to load notes');
-    } finally {
-      setNotesLoading(false);
-    }
-  };
-
-  const handleAddTag = async () => {
-    if (!newTag.trim() || !historyId || !findingId) return;
-    setTagError('');
-    try {
-      await SetFindingTag(historyId, findingId, newTag.trim());
-      setNewTag('');
-      loadTags();
-    } catch (e) {
-      setTagError('Failed to add tag');
-    }
-  };
-
-  const handleDeleteTag = async (tag: string) => {
-    if (!historyId || !findingId) return;
-    setTagError('');
-    try {
-      await DeleteFindingTag(historyId, findingId);
-      loadTags();
-    } catch (e) {
-      setTagError('Failed to delete tag');
-    }
-  };
-
-  const handleAddNote = async () => {
-    if (!newNote.trim() || !historyId || !findingId) return;
-    setNoteError('');
-    try {
-      await SetFindingNote(historyId, findingId, newNote.trim());
-      setNewNote('');
-      loadNotes();
-    } catch (e) {
-      setNoteError('Failed to add note');
-    }
-  };
-
-  const handleDeleteNote = async (noteId: number) => {
-    if (!historyId || !findingId) return;
-    setNoteError('');
-    try {
-      await DeleteFindingNote(historyId, findingId);
-      loadNotes();
-    } catch (e) {
-      setNoteError('Failed to delete note');
-    }
-  };
-
-  const tagOptions = ['Verified', 'False Positive', 'Needs Review', 'Accepted Risk'];
-
-  return (
-    <section className="rounded border border-slate-800 bg-slate-950/50 p-3 space-y-3">
-      <h4 className="font-semibold text-emerald-300 flex items-center gap-2">
-        Analyst Triage
-        <span className="text-[10px] text-slate-500">(persists in SQLite, included in reports)</span>
-      </h4>
-
-      {/* Tags */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="font-medium">Tags:</span>
-          {tags.length === 0 && <span className="text-slate-500">No tags yet</span>}
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {tags.map((t) => (
-            <span key={t.id} className="inline-flex items-center gap-1 rounded bg-emerald-950/40 border border-emerald-800 px-2 py-1 text-xs text-emerald-300">
-              {t.tag}
-              <button onClick={() => handleDeleteTag(t.tag)} className="hover:text-rose-400" title="Delete tag">✕</button>
-            </span>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {tagOptions.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => { setNewTag(opt); handleAddTag(); }}
-              className={`rounded border px-2 py-1 text-xs ${tags.some(t => t.tag === opt) ? 'bg-emerald-950/40 border-emerald-600 text-emerald-300' : 'border-slate-700 text-slate-300 hover:bg-slate-800'}`}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-            placeholder="Custom tag..."
-            className="flex-1 min-w-[150px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-          />
-          <button onClick={handleAddTag} disabled={tagsLoading || !newTag.trim()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">Add Tag</button>
-        </div>
-        {tagError && <p className="text-rose-400 text-xs">{tagError}</p>}
-      </div>
-
-      {/* Notes */}
-      <div className="space-y-2 pt-3 border-t border-slate-800">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="font-medium">Notes:</span>
-          {notes.length === 0 && <span className="text-slate-500">No notes yet</span>}
-        </div>
-        <div className="space-y-1">
-          {notes.map((n) => (
-            <div key={n.id} className="relative rounded bg-slate-900 border border-slate-800 p-2">
-              <button onClick={() => handleDeleteNote(n.id)} className="absolute top-1 right-1 text-[10px] text-slate-500 hover:text-rose-400" title="Delete note">✕</button>
-              <div className="text-xs text-slate-500 mb-1">{new Date(n.createdAt).toLocaleString()}</div>
-              <p className="text-sm text-slate-200 whitespace-pre-wrap">{n.note}</p>
-            </div>
-          ))}
-        </div>
-        <div className="space-y-1">
-          <textarea
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            placeholder="Add a note for this finding..."
-            rows={3}
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500 font-mono text-[11px]"
-          />
-          <button onClick={handleAddNote} disabled={notesLoading || !newNote.trim()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">Add Note</button>
-        </div>
-        {noteError && <p className="text-rose-400 text-xs">{noteError}</p>}
-      </div>
-    </section>
-  );
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [expandedGroups, setExpandedGroups] = useState<Set<NavGroup>>(new Set());
+  const navRef = useRef<HTMLNavElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
+        setExpandedGroups(new Set());
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // --- Port Scanner States ---
   const [target, setTarget] = useState('scanme.nmap.org');
@@ -559,7 +435,7 @@ export default function App() {
     void (async () => {
       try {
         const ws = await ListWorkspaces();
-        setWorkspaces(ws);
+        setWorkspaces(ws || []);
       } catch {}
     })();
   }, []);
@@ -940,7 +816,7 @@ export default function App() {
   const loadWorkspaces = async () => {
     try {
       const ws = await ListWorkspaces();
-      setWorkspaces(ws);
+      setWorkspaces(ws || []);
     } catch (error) {
       setWorkspaceError(errorMessage(error, 'Failed to load workspaces'));
     }
@@ -982,17 +858,6 @@ export default function App() {
       await refreshHistory();
     } catch (error) {
       setWorkspaceError(errorMessage(error, 'Failed to assign to workspace'));
-    }
-  };
-
-  const loadFindingTagsNotes = async (historyID: number) => {
-    setTagNoteHistoryID(historyID);
-    try {
-      const [tags, notes] = await Promise.all([GetFindingTags(historyID), GetFindingNotes(historyID)]);
-      setFindingTags(tags);
-      setFindingNotes(notes);
-    } catch (error) {
-      setWorkspaceError(errorMessage(error, 'Failed to load tags/notes'));
     }
   };
 
@@ -1181,46 +1046,87 @@ ${rows || '<p>No results.</p>'}
           </div>
         </div>
 
-        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[72%] lg:grid-cols-4 xl:grid-cols-10">
-          <button
-            type="button"
-            onClick={() => { setActiveTab('dashboard'); void refreshHistory(); }}
-            aria-pressed={activeTab === 'dashboard'}
-            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
-              activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('scanner')}
-            aria-pressed={activeTab === 'scanner'}
-            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
-              activeTab === 'scanner' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            Ports
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('analyzer')}
-            aria-pressed={activeTab === 'analyzer'}
-            className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${
-              activeTab === 'analyzer' ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            Web Audit
-          </button>
-          {([
-            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'], ['workspaces', 'Workspaces'], ['import', 'Import'], ['inspector', 'Inspector'], ['about', 'About'], ['cvefeed', 'CVE Feed'],
-          ] as const).map(([tab, label]) => (
-            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab as ActiveTab); if (tab === 'history') void refreshHistory(); if (tab === 'workspaces') void loadWorkspaces(); }}
-              className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              {label}
-            </button>
-          ))}
-          <button type="button" onClick={() => setCommandPaletteOpen(true)} title="Command palette (Ctrl/Cmd+K)" className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-300 hover:bg-slate-800 sm:px-3">⌘K</button>
+        <nav ref={navRef} aria-label="Scanner modules" className="flex flex-wrap gap-2 w-full lg:w-auto lg:max-w-[72%]">
+          {GROUP_ORDER.map((group) => {
+            const groupData = NAV_GROUPS[group];
+            const isExpanded = expandedGroups.has(group);
+            const isGroupActive = groupData.tabs.some((t) => t.id === activeTab);
+            const isSingleTab = groupData.tabs.length === 1;
+
+            if (isSingleTab) {
+              const tab = groupData.tabs[0];
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  onClick={() => { setActiveTab(tab.id); if (tab.id === 'history') void refreshHistory(); if (tab.id === 'workspaces') void loadWorkspaces(); }}
+                  aria-pressed={activeTab === tab.id}
+                  className={`rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    activeTab === tab.id ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            }
+
+            return (
+              <div key={group} className="relative flex items-center">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpandedGroups((prev) => {
+                      const next = new Set(prev);
+                      // Close all other groups, toggle this one
+                      if (next.has(group)) {
+                        next.delete(group);
+                      } else {
+                        next.clear();
+                        next.add(group);
+                      }
+                      return next;
+                    });
+                  }}
+                  aria-expanded={isExpanded}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    isGroupActive ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {groupData.label}
+                  <span className={`text-[10px] transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
+                </button>
+                {isExpanded && (
+                  <div className="absolute top-full left-0 mt-1 z-10 flex flex-col gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1.5 shadow-lg min-w-[140px]">
+                    {groupData.tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveTab(tab.id);
+                          setExpandedGroups((prev) => {
+                            const next = new Set(prev);
+                            next.delete(group);
+                            return next;
+                          });
+                          if (tab.id === 'history') void refreshHistory();
+                          if (tab.id === 'workspaces') void loadWorkspaces();
+                        }}
+                        aria-pressed={activeTab === tab.id}
+                        className={`rounded px-2.5 py-1.5 text-[11px] font-medium transition-colors text-left ${
+                          activeTab === tab.id ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} title="Command palette (Ctrl/Cmd+K)" className="rounded-lg border border-slate-700 px-3 py-2 text-[11px] font-semibold text-slate-300 hover:bg-slate-800">⌘K</button>
         </nav>
       </header>
       <main className="mx-auto w-full max-w-screen-2xl">
@@ -1280,6 +1186,58 @@ ${rows || '<p>No results.</p>'}
           const hasData = historyEntries.length > 0 || httpResults.length > 0 || findings.length > 0;
           const exportHistoryJSON = () => void ExportJSON('scan_history.json', JSON.stringify(historyEntries));
           const exportHistoryPDF = () => void ExportPDF('scan_history.pdf', JSON.stringify(historyEntries));
+
+          // Re-scan & Compare: re-run latest port scan and web audit for a target, then diff
+          const handleRescanAndCompare = async () => {
+            if (!historyTarget.trim()) {
+              setHistoryError('Enter a target to re-scan and compare');
+              return;
+            }
+            setIsHistoryBusy(true);
+            setHistoryError('');
+            try {
+              // Get latest port scan target
+              const latestPort = historyEntries.find((e) => e.scanType === 'port' && e.target === historyTarget.trim());
+              const latestHTTP = historyEntries.find((e) => e.scanType === 'http' && e.target === historyTarget.trim());
+
+              if (latestPort) {
+                try {
+                  const parsed = JSON.parse(latestPort.result);
+                  const ports = Array.isArray(parsed) ? parsed.map((p: any) => p.port).filter((p: number) => p > 0) : [];
+                  if (ports.length) {
+                    await StartPortScan(historyTarget.trim(), Math.min(...ports), Math.max(...ports), 200, 800, true);
+                  }
+                } catch {}
+              }
+
+              if (latestHTTP) {
+                try {
+                  const parsed = JSON.parse(latestHTTP.result);
+                  const urls = Array.isArray(parsed) ? parsed.map((r: any) => r.url).filter((u: string) => u) : [];
+                  if (urls.length) {
+                    await AnalyzeBulkURLs(urls.join('\n'), 10, true, 0, 0, 0, '', 10, {}, '', '', '');
+                  }
+                } catch {}
+              }
+
+              // Wait a bit for scans to complete, then refresh diffs
+              setTimeout(async () => {
+                try {
+                  const [portDiffResult, webAuditDiffResult] = await Promise.all([
+                    DiffLatestPortScans(historyTarget.trim()),
+                    DiffLatestWebAuditScans(historyTarget.trim()),
+                  ]);
+                  setPortDiff(portDiffResult);
+                  setWebAuditDiff(webAuditDiffResult);
+                } catch {}
+                setIsHistoryBusy(false);
+              }, 5000);
+            } catch (error) {
+              setHistoryError(errorMessage(error, 'Re-scan failed'));
+              setIsHistoryBusy(false);
+            }
+          };
+
           const Stat = ({ label, value, note }: { label: string; value: string | number; note?: string }) => (
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
@@ -1289,41 +1247,14 @@ ${rows || '<p>No results.</p>'}
           );
 return (
             <div className="space-y-4">
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-sm font-bold text-slate-100">Dashboard</h2>
-                    <p className="text-xs text-slate-400">Summary from locally stored history and current in-app results. Run a scan or refresh history to populate.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => void refreshHistory()} disabled={isHistoryBusy} className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold disabled:bg-slate-700">{isHistoryBusy ? 'Loadingâ€¦' : 'Refresh'}</button>
-                    <button onClick={exportHistoryJSON} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History JSON</button>
-                    <button onClick={exportHistoryPDF} disabled={!historyEntries.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export History PDF</button>
-                    <button onClick={() => setActiveTab('history')} className="min-h-10 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open History</button>
-                  </div>
-                </div>
-                {historyError && <p role="alert" className="mt-3 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">{historyError}</p>}
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <Stat label="History records" value={historyEntries.length} note={historyEntries.length ? 'Latest 50 loaded from local SQLite' : 'No local records loaded'} />
+                <Stat label="Latest port scan" value={latestPort ? latestPortCount : '—'} note={latestPort ? `${latestPort.target}${latestPortParseError ? ' (result unreadable)' : ' open ports in snapshot'}` : 'No port scan saved yet'} />
+                <Stat label="Latest Web Audit" value={latestHTTP ? `${latestHTTPTargets} target(s)` : '—'} note={latestHTTP ? (latestHTTPParseError ? 'Result unreadable' : `Avg risk ${latestHTTPAvgRisk}/100`) : 'No Web Audit saved yet'} />
+                <Stat label="Finding severity (latest Web Audit)" value={totalFindings} note={latestHTTP ? 'Counts from stored findings' : 'No findings summary available'} />
               </div>
 
-              {!hasData && !isHistoryBusy ? (
-                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center">
-                  <p className="text-sm font-semibold text-slate-200">No scan data yet</p>
-                  <p className="mt-2 text-xs text-slate-400">Start with an authorized port scan or Web Audit. History-backed summaries appear here once results are stored locally.</p>
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    <button onClick={() => setActiveTab('scanner')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold">Open Ports</button>
-                    <button onClick={() => setActiveTab('analyzer')} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Open Web Audit</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <Stat label="History records" value={historyEntries.length} note={historyEntries.length ? 'Latest 50 loaded from local SQLite' : 'No local records loaded'} />
-                    <Stat label="Latest port scan" value={latestPort ? latestPortCount : '—'} note={latestPort ? `${latestPort.target}${latestPortParseError ? ' (result unreadable)' : ' open ports in snapshot'}` : 'No port scan saved yet'} />
-                    <Stat label="Latest Web Audit" value={latestHTTP ? `${latestHTTPTargets} target(s)` : '—'} note={latestHTTP ? (latestHTTPParseError ? 'Result unreadable' : `Avg risk ${latestHTTPAvgRisk}/100`) : 'No Web Audit saved yet'} />
-                    <Stat label="Finding severity (latest Web Audit)" value={totalFindings} note={latestHTTP ? 'Counts from stored findings' : 'No findings summary available'} />
-                  </div>
-
-                  <div className="grid gap-4 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-2">
                     <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
                       <h3 className="text-sm font-bold">Open ports / findings breakdown</h3>
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -1372,9 +1303,7 @@ return (
                       ) : portDiff?.target ? <p className="text-xs text-slate-500">No port changes for {portDiff.target} (or fewer than two snapshots).</p> : null}
                     </div>
                   </div>
-                </>
-              )}
-            </div>
+                </div>
           );
         })()
       )}
@@ -2004,6 +1933,27 @@ return (
                       </div>
                     ) : null}
 
+                    {res.wafDetections && res.wafDetections.length > 0 ? (
+                      <div className="rounded-lg border border-amber-900 bg-amber-950/30 p-3 space-y-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-300">WAF / CDN Detection ({res.wafDetections.length})</div>
+                        {res.wafDetections.map((waf) => (
+                          <div key={waf.name} className="rounded border border-amber-800 bg-amber-950/50 p-2 space-y-1">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-bold uppercase">{waf.category}</span>
+                              <span className="text-amber-200">{waf.name}</span>
+                              <span className={`rounded px-1.5 py-0.5 text-[10px] ${waf.confidence === 'high' ? 'bg-emerald-900 text-emerald-300' : waf.confidence === 'medium' ? 'bg-amber-900 text-amber-300' : 'bg-slate-700 text-slate-300'}`}>
+                                {waf.confidence}
+                              </span>
+                            </div>
+                            {waf.headers?.length && <div className="text-[10px] text-slate-400">Headers: {waf.headers.join(', ')}</div>}
+                            {waf.cookies?.length && <div className="text-[10px] text-slate-400">Cookies: {waf.cookies.join(', ')}</div>}
+                            {waf.bodyMatches?.length && <div className="text-[10px] text-slate-400">Body matches: {waf.bodyMatches.join(', ')}</div>}
+                            {waf.note && <div className="text-[10px] text-slate-300">{waf.note}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
                     {res.tls && (
                       <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200 space-y-1">
                         <div>TLS {res.tls.version} · {res.tls.cipherSuite} · {res.tls.verified ? 'Certificate verified' : 'Certificate not verified'}</div>
@@ -2412,11 +2362,26 @@ return (
           <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl" onClick={(e)=>e.stopPropagation()}>
             <input autoFocus value={paletteQuery} onChange={(e)=>setPaletteQuery(e.target.value)} placeholder="Go to module or action... (Ctrl/Cmd+K)" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
             <div className="mt-2 max-h-72 space-y-1 overflow-auto">
-              {(([
-                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],['Workspaces','workspaces'],['Import','import'],['Inspector','inspector'],['About','about'],['CVE Feed','cvefeed'],
-              ] as [string,ActiveTab][]).filter(([l])=>l.toLowerCase().includes(paletteQuery.toLowerCase()))).map(([label,tab])=>(
-                <button key={tab} type="button" onClick={()=>{ setActiveTab(tab); if(tab==='history') void refreshHistory(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{label} <span className="text-xs text-slate-500">module</span></button>
-              ))}
+              {GROUP_ORDER.map((group) => {
+                const groupData = NAV_GROUPS[group];
+                const isSingleTab = groupData.tabs.length === 1;
+                if (isSingleTab) {
+                  const tab = groupData.tabs[0];
+                  return (
+                    <button key={group} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
+                  );
+                }
+                return (
+                  <div key={group}>
+                    <span className="px-3 py-1 text-[11px] text-slate-500">{groupData.label}</span>
+                    {groupData.tabs.map((tab) => (
+                      <button key={tab.id} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
+                    ))}
+                  </div>
+                );
+              })}
+              <hr className="border-slate-800 my-1" />
+              <span className="px-3 py-1 text-[11px] text-slate-500">Actions</span>
               <button type="button" onClick={()=>{ void refreshHistory(); setActiveTab('history'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Refresh History <span className="text-xs text-slate-500">action</span></button>
               <button type="button" onClick={()=>{ void togglePause(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{isPaused?'Resume scans':'Pause scans'} <span className="text-xs text-slate-500">action</span></button>
               <hr className="border-slate-800 my-1" />
@@ -2458,8 +2423,6 @@ return (
               </div>
               {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
                 <div className="mt-4 space-y-4 text-sm">
-                  {/* Finding Tags & Notes Section */}
-                  <FindingTagsNotes historyId={findingDrawerHistoryId!} findingId={findingDrawerId!} />
                   <section className="rounded border border-slate-800 bg-slate-950/50 p-3"><div className="flex flex-wrap gap-2 text-xs"><span className="rounded bg-rose-950/60 px-2 py-1 text-rose-300">Severity: {g.severity || 'review'}</span><span className="rounded bg-sky-950/60 px-2 py-1 text-sky-300">Priority: {g.priority || 'P2'}</span><span className="rounded bg-amber-950/60 px-2 py-1 text-amber-300">Change risk: {g.changeRisk || 'unknown'}</span></div></section>
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Root cause</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'rootCause')}</p></section>
@@ -2855,7 +2818,7 @@ return (
               <div>
                 <h2 className="text-xl font-bold tracking-[0.14em] text-emerald-400">CODEXA SCANNER</h2>
                 <p className="text-sm text-slate-400">Authorized Network & Web Security Assessment</p>
-                <p className="text-xs text-slate-500 mt-1">Version 1.1.5</p>
+                <p className="text-xs text-slate-500 mt-1">Version 1.1.7</p>
               </div>
             </div>
             <hr className="border-slate-800" />

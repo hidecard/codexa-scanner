@@ -321,123 +321,190 @@ func checkTakeoverClues(subdomains []string) []TakeoverClue {
 		pattern        string
 		provider       string
 		checkUnclaimed func(string) (bool, string)
+		verifyUnclaimed func(string) (bool, string) // HTTP-based verification
 	}{
 		"github.io": {
 			{pattern: "github.io", provider: "GitHub Pages",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "GitHub Pages: verify the repository exists and has Pages enabled"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyGitHubPagesUnclaimed(target)
 				}},
 		},
 		"herokuapp.com": {
 			{pattern: "herokuapp.com", provider: "Heroku",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Heroku: verify the app exists and is not deleted"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyHerokuUnclaimed(target)
 				}},
 		},
 		"vercel.app": {
 			{pattern: "vercel.app", provider: "Vercel",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Vercel: verify the project exists and is deployed"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyVercelUnclaimed(target)
 				}},
 			{pattern: "now.sh", provider: "Vercel (legacy now.sh)",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Vercel (legacy): verify the project exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyVercelUnclaimed(target)
 				}},
 		},
 		"netlify.app": {
 			{pattern: "netlify.app", provider: "Netlify",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Netlify: verify the site exists and is deployed"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyNetlifyUnclaimed(target)
 				}},
 			{pattern: "netlify.com", provider: "Netlify (legacy)",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Netlify: verify the site exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyNetlifyUnclaimed(target)
 				}},
 		},
 		"amazonaws.com": {
 			{pattern: "s3.amazonaws.com", provider: "AWS S3",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "AWS S3: verify the bucket exists and is configured for static website hosting"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyS3Unclaimed(target)
 				}},
 			{pattern: "cloudfront.net", provider: "AWS CloudFront",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "AWS CloudFront: verify the distribution exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyCloudFrontUnclaimed(target)
 				}},
 			{pattern: "elasticbeanstalk.com", provider: "AWS Elastic Beanstalk",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "AWS Elastic Beanstalk: verify the environment exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyBeanstalkUnclaimed(target)
 				}},
 		},
 		"azure.com": {
 			{pattern: "azurewebsites.net", provider: "Azure App Service",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Azure App Service: verify the web app exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyAzureUnclaimed(target)
 				}},
 			{pattern: "blob.core.windows.net", provider: "Azure Blob Storage",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Azure Blob Storage: verify the storage account and container exist"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyAzureBlobUnclaimed(target)
 				}},
 			{pattern: "trafficmanager.net", provider: "Azure Traffic Manager",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Azure Traffic Manager: verify the profile exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyAzureTMUnclaimed(target)
 				}},
 		},
 		"surge.sh": {
 			{pattern: "surge.sh", provider: "Surge.sh",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Surge.sh: verify the project exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifySurgeUnclaimed(target)
 				}},
 		},
 		"firebaseapp.com": {
 			{pattern: "firebaseapp.com", provider: "Firebase Hosting",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Firebase Hosting: verify the project exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyFirebaseUnclaimed(target)
 				}},
 			{pattern: "web.app", provider: "Firebase Hosting (web.app)",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Firebase Hosting: verify the project exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyFirebaseUnclaimed(target)
 				}},
 		},
 		"gitlab.io": {
 			{pattern: "gitlab.io", provider: "GitLab Pages",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "GitLab Pages: verify the project exists and Pages is enabled"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyGitLabUnclaimed(target)
 				}},
 		},
 		"shopify.com": {
 			{pattern: "myshopify.com", provider: "Shopify",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Shopify: verify the store exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyShopifyUnclaimed(target)
 				}},
 		},
 		"ghost.io": {
 			{pattern: "ghost.io", provider: "Ghost",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Ghost: verify the publication exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyGhostUnclaimed(target)
 				}},
 		},
 		"wpengine.com": {
 			{pattern: "wpengine.com", provider: "WP Engine",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "WP Engine: verify the site exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyWPEngineUnclaimed(target)
 				}},
 		},
 		"fastly.net": {
 			{pattern: "fastly.net", provider: "Fastly",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Fastly: verify the service exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyFastlyUnclaimed(target)
 				}},
 		},
 		"pantheon.io": {
 			{pattern: "pantheon.io", provider: "Pantheon",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Pantheon: verify the site exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyPantheonUnclaimed(target)
 				}},
 		},
 		"bitbucket.io": {
 			{pattern: "bitbucket.io", provider: "Bitbucket Pages",
 				checkUnclaimed: func(target string) (bool, string) {
 					return true, "Bitbucket Pages: verify the repository exists"
+				},
+				verifyUnclaimed: func(target string) (bool, string) {
+					return verifyBitbucketUnclaimed(target)
 				}},
 		},
 	}
@@ -465,9 +532,14 @@ func checkTakeoverClues(subdomains []string) []TakeoverClue {
 						status = "unresolved"
 						evidence = fmt.Sprintf("CNAME target %s does not resolve (%s)", cname, p.provider)
 					} else {
-						// For some providers, we can do additional checks
-						// For now, mark as "potential" if it resolves
-						// A more thorough check would require HTTP requests
+						// Active HTTP verification for unclaimed resources
+						if p.verifyUnclaimed != nil {
+							unclaimed, verifyEvidence := p.verifyUnclaimed(cname)
+							if unclaimed {
+								status = "unclaimed"
+								evidence = verifyEvidence
+							}
+						}
 					}
 
 					unclaimed, remediation := p.checkUnclaimed(cname)
@@ -1331,4 +1403,270 @@ func calculateEmailPolicyRating(analysis *EmailPolicyAnalysis) string {
 		return "weak"
 	}
 	return "missing"
+}
+
+// ==========================================
+// Subdomain Takeover Active Verification (P18.2)
+// Passive HTTP verification of CNAME targets to detect unclaimed resources
+// ==========================================
+
+var httpClient = &http.Client{
+	Timeout: 5 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+func fetchTakeoverTarget(target string) (string, int, error) {
+	// Ensure target has a scheme
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		target = "https://" + target
+	}
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("User-Agent", "Codexa Scanner Takeover Verification")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		// Try HTTP if HTTPS fails
+		if strings.HasPrefix(target, "https://") {
+			target = "http://" + strings.TrimPrefix(target, "https://")
+			req, _ = http.NewRequest(http.MethodGet, target, nil)
+			req.Header.Set("User-Agent", "Codexa Scanner Takeover Verification")
+			resp, err = httpClient.Do(req)
+			if err != nil {
+				return "", 0, err
+			}
+		} else {
+			return "", 0, err
+		}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	return string(body), resp.StatusCode, nil
+}
+
+func verifyGitHubPagesUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("GitHub Pages: verification failed (%v)", err)
+	}
+	// GitHub Pages unclaimed: "There isn't a GitHub Pages site here"
+	if status == 404 && strings.Contains(body, "There isn't a GitHub Pages site here") {
+		return true, fmt.Sprintf("GitHub Pages: unclaimed (404 with 'There isn't a GitHub Pages site here')")
+	}
+	return false, fmt.Sprintf("GitHub Pages: active (status %d)", status)
+}
+
+func verifyHerokuUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Heroku: verification failed (%v)", err)
+	}
+	// Heroku unclaimed: "No such app"
+	if status == 404 && (strings.Contains(body, "No such app") || strings.Contains(body, "no such app")) {
+		return true, fmt.Sprintf("Heroku: unclaimed (404 with 'No such app')")
+	}
+	return false, fmt.Sprintf("Heroku: active (status %d)", status)
+}
+
+func verifyVercelUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Vercel: verification failed (%v)", err)
+	}
+	// Vercel unclaimed: "Deployment not found"
+	if status == 404 && (strings.Contains(body, "Deployment not found") || strings.Contains(body, "deployment not found")) {
+		return true, fmt.Sprintf("Vercel: unclaimed (404 with 'Deployment not found')")
+	}
+	return false, fmt.Sprintf("Vercel: active (status %d)", status)
+}
+
+func verifyNetlifyUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Netlify: verification failed (%v)", err)
+	}
+	// Netlify unclaimed: "Not Found" or "Site not found"
+	if status == 404 && (strings.Contains(body, "Not Found") || strings.Contains(body, "Site not found") || strings.Contains(body, "site not found")) {
+		return true, fmt.Sprintf("Netlify: unclaimed (404 with 'Not Found')")
+	}
+	return false, fmt.Sprintf("Netlify: active (status %d)", status)
+}
+
+func verifyS3Unclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("AWS S3: verification failed (%v)", err)
+	}
+	// S3 unclaimed: "NoSuchBucket"
+	if status == 404 && (strings.Contains(body, "NoSuchBucket") || strings.Contains(body, "no such bucket")) {
+		return true, fmt.Sprintf("AWS S3: unclaimed (404 with 'NoSuchBucket')")
+	}
+	return false, fmt.Sprintf("AWS S3: active (status %d)", status)
+}
+
+func verifyCloudFrontUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("AWS CloudFront: verification failed (%v)", err)
+	}
+	// CloudFront unclaimed: various 404 responses
+	if status == 404 {
+		return true, fmt.Sprintf("AWS CloudFront: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("AWS CloudFront: active (status %d)", status)
+}
+
+func verifyBeanstalkUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("AWS Elastic Beanstalk: verification failed (%v)", err)
+	}
+	// Beanstalk unclaimed: environment not found
+	if status == 404 && (strings.Contains(body, "Environment") && strings.Contains(body, "not found")) {
+		return true, fmt.Sprintf("AWS Elastic Beanstalk: unclaimed (404 with 'Environment not found')")
+	}
+	return false, fmt.Sprintf("AWS Elastic Beanstalk: active (status %d)", status)
+}
+
+func verifyAzureUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Azure App Service: verification failed (%v)", err)
+	}
+	// Azure unclaimed: "404 Web Site not found"
+	if status == 404 && (strings.Contains(body, "404 Web Site not found") || strings.Contains(body, "Web Site not found")) {
+		return true, fmt.Sprintf("Azure App Service: unclaimed (404 with '404 Web Site not found')")
+	}
+	return false, fmt.Sprintf("Azure App Service: active (status %d)", status)
+}
+
+func verifyAzureBlobUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Azure Blob Storage: verification failed (%v)", err)
+	}
+	// Azure Blob unclaimed: "BlobNotFound" or 404
+	if status == 404 && (strings.Contains(body, "BlobNotFound") || strings.Contains(body, "ContainerNotFound")) {
+		return true, fmt.Sprintf("Azure Blob Storage: unclaimed (404 with Blob/Container not found)")
+	}
+	return false, fmt.Sprintf("Azure Blob Storage: active (status %d)", status)
+}
+
+func verifyAzureTMUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Azure Traffic Manager: verification failed (%v)", err)
+	}
+	if status == 404 {
+		return true, fmt.Sprintf("Azure Traffic Manager: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("Azure Traffic Manager: active (status %d)", status)
+}
+
+func verifySurgeUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Surge.sh: verification failed (%v)", err)
+	}
+	// Surge unclaimed: "project not found"
+	if status == 404 && (strings.Contains(body, "project not found") || strings.Contains(body, "Project not found")) {
+		return true, fmt.Sprintf("Surge.sh: unclaimed (404 with 'project not found')")
+	}
+	return false, fmt.Sprintf("Surge.sh: active (status %d)", status)
+}
+
+func verifyFirebaseUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Firebase Hosting: verification failed (%v)", err)
+	}
+	// Firebase unclaimed: "Hosting error" or "Site not found"
+	if status == 404 && (strings.Contains(body, "Hosting error") || strings.Contains(body, "Site not found")) {
+		return true, fmt.Sprintf("Firebase Hosting: unclaimed (404 with 'Hosting error')")
+	}
+	return false, fmt.Sprintf("Firebase Hosting: active (status %d)", status)
+}
+
+func verifyGitLabUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("GitLab Pages: verification failed (%v)", err)
+	}
+	// GitLab Pages unclaimed: "The page could not be found"
+	if status == 404 && (strings.Contains(body, "The page could not be found") || strings.Contains(body, "page could not be found")) {
+		return true, fmt.Sprintf("GitLab Pages: unclaimed (404 with 'The page could not be found')")
+	}
+	return false, fmt.Sprintf("GitLab Pages: active (status %d)", status)
+}
+
+func verifyShopifyUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Shopify: verification failed (%v)", err)
+	}
+	// Shopify unclaimed: "Sorry, this shop is currently unavailable"
+	if status == 404 && (strings.Contains(body, "this shop is currently unavailable") || strings.Contains(body, "store unavailable")) {
+		return true, fmt.Sprintf("Shopify: unclaimed (404 with 'shop unavailable')")
+	}
+	return false, fmt.Sprintf("Shopify: active (status %d)", status)
+}
+
+func verifyGhostUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Ghost: verification failed (%v)", err)
+	}
+	// Ghost unclaimed: publication not found
+	if status == 404 {
+		return true, fmt.Sprintf("Ghost: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("Ghost: active (status %d)", status)
+}
+
+func verifyWPEngineUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("WP Engine: verification failed (%v)", err)
+	}
+	if status == 404 {
+		return true, fmt.Sprintf("WP Engine: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("WP Engine: active (status %d)", status)
+}
+
+func verifyFastlyUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Fastly: verification failed (%v)", err)
+	}
+	if status == 404 {
+		return true, fmt.Sprintf("Fastly: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("Fastly: active (status %d)", status)
+}
+
+func verifyPantheonUnclaimed(target string) (bool, string) {
+	_, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Pantheon: verification failed (%v)", err)
+	}
+	if status == 404 {
+		return true, fmt.Sprintf("Pantheon: potentially unclaimed (404)")
+	}
+	return false, fmt.Sprintf("Pantheon: active (status %d)", status)
+}
+
+func verifyBitbucketUnclaimed(target string) (bool, string) {
+	body, status, err := fetchTakeoverTarget(target)
+	if err != nil {
+		return false, fmt.Sprintf("Bitbucket Pages: verification failed (%v)", err)
+	}
+	// Bitbucket unclaimed: "Repository not found"
+	if status == 404 && (strings.Contains(body, "Repository not found") || strings.Contains(body, "repository not found")) {
+		return true, fmt.Sprintf("Bitbucket Pages: unclaimed (404 with 'Repository not found')")
+	}
+	return false, fmt.Sprintf("Bitbucket Pages: active (status %d)", status)
 }

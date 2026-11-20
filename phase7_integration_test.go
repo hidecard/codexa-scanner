@@ -90,7 +90,7 @@ func TestIntegrationJSONAndPDFExportWithLocalFixtures(t *testing.T) {
 	dir := t.TempDir()
 	input := `[{"url":"https://user:pass@example.test/path?token=secret","statusCode":200,"grade":"B","riskScore":25,"findings":[{"severity":"medium","title":"CSP allows unsafe inline scripts","description":"d","recommendation":"Use nonces","evidence":"script-src 'unsafe-inline'"}],"error":""}]`
 
-	env, out, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	env, out, err := prepareScanReportEnvelope("http_security_audit.json", input, nil)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

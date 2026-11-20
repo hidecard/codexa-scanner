@@ -59,19 +59,19 @@ For development, run `wails dev` from the repository root after installing depen
 
 Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Headless CLI](docs/cli.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md), plus the [Latest Threat & CVE Feed](docs/cve-feed.md) guide and the [Engagement Workflows](docs/engagement-workflows.md) guide. The complete documentation index is in [`docs/README.md`](docs/README.md).
 
-## CI artifacts and releases (v1.1.6)
+## CI artifacts and releases (v1.1.7)
 
 GitHub Actions (`.github/workflows/build.yml`) runs on pushes to `main`, pull requests, and version tags (`v*`).
 
 - **Permissions:** least-privilege by default (`contents: read`); only the tag-release job is granted `contents: write`.
-- **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.1.6_amd64.deb`.
+- **Linux (`ubuntu-22.04`):** builds the app, runs `go test -race ./...` and `go vet ./...`, and packages `CodexaScanner_1.1.7_amd64.deb`.
 - **Windows (`windows-latest`):** builds portable `CodexaScanner.exe` and runs `go test ./...` and `go vet ./...`.
 - **macOS:** builds both Intel (`amd64`, `macos-13`) and Apple Silicon (`arm64`, `macos-15`) application bundles, then packages `CodexaScanner-amd64.dmg` and `CodexaScanner-arm64.dmg`.
-- **Release (tag `v1.1.6` / `v*`):** attaches `.deb`, `.exe`, and both `.dmg` assets to a GitHub Release with generated notes.
+- **Release (tag `v1.1.7` / `v*`):** attaches `.deb`, `.exe`, and both `.dmg` assets to a GitHub Release with generated notes.
 
 The macOS DMGs are currently unsigned and not notarized. On a clean Mac, open the DMG, drag **CodexaScanner.app** to **Applications**, then use **Open** from the Finder context menu the first time if Gatekeeper blocks the unsigned app.
 
-Frontend dependencies are pinned with a committed lockfile to reduce build drift. The verified `v1.1.6` release is available at https://github.com/hidecard/codexa-scanner/releases/tag/v1.1.6. Download build artifacts from the Actions run or the GitHub Release assets. The v1.1.6 release is also available at https://codexa-scanner.spacetikapp.com/. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
+Frontend dependencies are pinned with a committed lockfile to reduce build drift. The verified `v1.1.7` release is available at https://github.com/hidecard/codexa-scanner/releases/tag/v1.1.7. Download build artifacts from the Actions run or the GitHub Release assets. The v1.1.7 release is also available at https://codexa-scanner.spacetikapp.com/. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
 
 ## Repository topics
 
@@ -83,7 +83,7 @@ This software is provided for authorized testing, education, and defensive secur
 
 ### Latest Threat & CVE Feed (P10.4 upgrade)
 
-Version 1.1.6 adds an explicit **Sync Latest CVEs** action. It fetches the public CISA KEV JSON feed and recent Critical/High CVEs from the NVD 2.0 API (last 24 hours) without an API key, using a 15-second timeout. Results are stored in the local `history.sqlite` database (`cve_feed` table), shown on the Dashboard for the last 1, 7, or 30 days, and remain available offline. Sync never runs automatically at application startup; if either remote source is unavailable, the bundled `knowledge/advisory.json` and previously cached feed are retained. Cached versioned advisories are also considered by the passive matcher after a successful sync.
+Version 1.1.7 adds an explicit **Sync Latest CVEs** action. It fetches the public CISA KEV JSON feed and recent Critical/High CVEs from the NVD 2.0 API (last 24 hours) without an API key, using a 15-second timeout. Results are stored in the local `history.sqlite` database (`cve_feed` table), shown on the Dashboard for the last 1, 7, or 30 days, and remain available offline. Sync never runs automatically at application startup; if either remote source is unavailable, the bundled `knowledge/advisory.json` and previously cached feed are retained. Cached versioned advisories are also considered by the passive matcher after a successful sync.
 
 
 

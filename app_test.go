@@ -424,8 +424,8 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
-	if got := atomic.LoadInt32(&requests); got != 6 {
-		t.Fatalf("expected main request plus security.txt/robots.txt/graphql/swagger/openapi inspector requests after opt-in, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 26 {
+		t.Fatalf("expected main request plus inspectors and config leak checks after opt-in, got %d", got)
 	}
 }
 
@@ -496,8 +496,8 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 	if got := lookup.lookupCount(); got != 1 {
 		t.Fatalf("expected hostname to resolve once across redirect chain, got %d lookups", got)
 	}
-	if got := atomic.LoadInt32(&requests); got != 7 {
-		t.Fatalf("expected initial, redirected, and security.txt/robots.txt/graphql/swagger/openapi inspector requests, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 27 {
+		t.Fatalf("expected initial, redirected, inspectors, and config leak checks, got %d", got)
 	}
 	if result.SecurityTxt == nil || result.RobotsTxt == nil {
 		t.Fatalf("expected inspector results, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
@@ -521,8 +521,8 @@ func TestAnalyzeURLStopsAfterFiveRedirects(t *testing.T) {
 	if !strings.Contains(result.Error, "after five hops") {
 		t.Fatalf("expected five-hop redirect limit error, got %+v", result)
 	}
-	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+6 {
-		t.Fatalf("expected initial request, five redirects, and security.txt/robots.txt/graphql/swagger/openapi inspector requests, got %d requests", got)
+	if got := atomic.LoadInt32(&requests); got != 11 {
+		t.Fatalf("expected initial request, five redirects, and inspectors (config leak checks not run on redirect limit error), got %d requests", got)
 	}
 	if result.SecurityTxt == nil || result.RobotsTxt == nil {
 		t.Fatalf("expected inspector results on redirect-limit error, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
@@ -898,7 +898,7 @@ func TestAnalyzeURLReportsMissingSecurityTxtAndRobotsTxt(t *testing.T) {
 
 func TestPrepareScanReportEnvelopeRedactsAndAddsModel(t *testing.T) {
 	input := `[{"url":"https://user:pass@example.test/path?token=secret&ok=1","statusCode":200,"grade":"B","riskScore":20,"findings":[{"severity":"high","title":"Test finding","description":"d","recommendation":"Rotate secrets and use HTTPS.","evidence":"Authorization: Bearer abc"}]}]`
-	env, out, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	env, out, err := prepareScanReportEnvelope("http_security_audit.json", input, nil)
 	if err != nil {
 		t.Fatalf("prepareScanReportEnvelope: %v", err)
 	}
@@ -927,7 +927,7 @@ func TestPrepareScanReportEnvelopeRedactsAndAddsModel(t *testing.T) {
 
 func TestPrepareScanReportEnvelopeSupportsComparisonWrapper(t *testing.T) {
 	input := `{"data":[{"url":"https://example.test","statusCode":200,"grade":"A","riskScore":0,"findings":[]}],"comparison":{"target":"https://example.test","note":"ok"},"metadata":{"target":"https://example.test"}}`
-	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input, nil)
 	if err != nil {
 		t.Fatalf("prepareScanReportEnvelope: %v", err)
 	}
@@ -941,7 +941,7 @@ func TestPrepareScanReportEnvelopeSupportsComparisonWrapper(t *testing.T) {
 
 func TestPrepareScanReportEnvelopeBuildsEngagementSummary(t *testing.T) {
 	input := `[{"id":1,"scanType":"port","target":"alpha.example","result":"{}"},{"id":2,"scanType":"http","target":"beta.example","result":"{}"}]`
-	env, _, err := prepareScanReportEnvelope("engagement_report.json", input)
+	env, _, err := prepareScanReportEnvelope("engagement_report.json", input, nil)
 	if err != nil {
 		t.Fatalf("prepareScanReportEnvelope: %v", err)
 	}
@@ -955,7 +955,7 @@ func TestPrepareScanReportEnvelopeBuildsEngagementSummary(t *testing.T) {
 
 func TestWritePDFReportCreatesFile(t *testing.T) {
 	input := `[{"url":"https://example.test","statusCode":200,"grade":"A","riskScore":5,"findings":[{"severity":"info","title":"Note","description":"d","recommendation":"r"}],"error":""}]`
-	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input)
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", input, nil)
 	if err != nil {
 		t.Fatalf("prepareScanReportEnvelope: %v", err)
 	}
@@ -1000,7 +1000,7 @@ func TestWritePDFReportHandlesLargeReport(t *testing.T) {
 		})
 	}
 	raw, _ := json.Marshal(results)
-	env, _, err := prepareScanReportEnvelope("http_security_audit.json", string(raw))
+	env, _, err := prepareScanReportEnvelope("http_security_audit.json", string(raw), nil)
 	if err != nil {
 		t.Fatalf("prepareScanReportEnvelope: %v", err)
 	}

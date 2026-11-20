@@ -1,6 +1,6 @@
 # Engagement Workflows
 
-This guide covers the cross-module workflow features shipped in Codexa Scanner 1.1.6. Use them only within an approved assessment scope.
+This guide covers the cross-module workflow features shipped in Codexa Scanner 1.1.7. Use them only within an approved assessment scope.
 
 ## Workspaces
 
