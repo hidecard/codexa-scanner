@@ -17,7 +17,7 @@ For development, run `wails dev` from the repository root. For a Linux desktop b
 
 ## 3. Choose the right feature
 
-Use **Dashboard** to review local scan summaries and the opt-in **Latest Threat & CVE Feed**. Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, select records across targets and scan types, and build consolidated engagement reports.
+Use **Dashboard** to review local scan summaries and the opt-in **Latest Threat & CVE Feed**. Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, select records across targets and scan types, and build consolidated engagement reports. Use **Workspaces**, **Import**, **Inspector**, and **Playbook** for engagement organization, external-tool handoff, bounded request review, and remediation guidance.
 
 Each feature guide explains its accepted input format, step-by-step workflow, output interpretation, limits, and troubleshooting:
 
@@ -30,6 +30,7 @@ Each feature guide explains its accepted input format, step-by-step workflow, ou
 - [IP Information](ip-information.md)
 - [History and Reports](history-and-reports.md)
 - [Latest Threat & CVE Feed](cve-feed.md)
+- [Engagement Workflows](engagement-workflows.md)
 
 ## 4. Recommended assessment workflow
 
@@ -43,7 +44,7 @@ Private RFC1918, IPv6 ULA, and loopback HTTP targets are blocked by default and 
 
 ## 6. Latest Threat & CVE Feed
 
-The Dashboard feed is manual and opt-in. Click **Sync Latest CVEs** to retrieve CISA KEV and recent Critical/High NVD entries. Select a 7-day or 30-day view. The request timeout is 15 seconds per source. Feed results are stored in the local `cve_feed` SQLite table and remain available offline; a failed sync falls back to the existing cache and bundled advisory database. See [Latest Threat & CVE Feed](cve-feed.md) for details.
+The Dashboard feed is manual and opt-in. Click **Sync Latest CVEs** to retrieve CISA KEV and recent Critical/High NVD entries. Select a 7-day or 30-day view. The request timeout is 15 seconds per source. Feed results are stored in the local `cve_feed` SQLite table and remain available offline; a failed sync falls back to the existing cache and bundled advisory database. See [Latest Threat & CVE Feed](cve-feed.md) and [Engagement Workflows](engagement-workflows.md) for details.
 
 ## 7. Local history and privacy
 

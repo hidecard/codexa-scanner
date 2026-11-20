@@ -24,6 +24,7 @@ This document covers GitHub release packaging (v1.1.5) and the required clean-ma
 2. Click **Sync Latest CVEs** with network access and verify that the result status reports cached records or source warnings without exposing target history.
 3. Restart with network access unavailable and confirm the cached feed remains visible. Confirm the bundled advisory matcher remains available even with an empty feed cache.
 4. If a test Web Audit identifies a matching product, confirm the Dashboard can show the affected-asset badge as a prioritization signal, not a vulnerability proof.
+5. Verify imported Nmap/subdomain data, workspace assignment, Inspector safe-method limits, Playbook navigation, and analyst tags/notes on a clean profile.
 
 ## Clean-machine verification (required for Phase 8)
 

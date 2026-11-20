@@ -23,6 +23,7 @@ Desktop network reconnaissance and HTTP security-header inspection application b
 - **External Tool Import**: Nmap XML (`nmap -oX`) import populating open ports and queuing HTTP/HTTPS endpoints for Web Audit. Newline-delimited subdomain list import (subfinder, amass) with deduplication and validation. Workspace-targeted import with result summaries.
 - **HTTP Inspector & Replay**: Raw request/response headers, body preview, TLS details, negotiated HTTP/2/HTTP/3, weak cipher warnings. Bounded replay with safe methods (GET, HEAD, OPTIONS) and modified headers within same host/port scope.
 - **Global Rate Limiting**: Configurable RPS caps, random jitter delays, pause/resume lifecycle controls for Web Audit, Path Fuzzer, and CIDR sweep. Respects target rate limits.
+- **Engagement Workflows**: Workspaces, Nmap XML/subdomain imports, HTTP Inspector & bounded replay, analyst tags/notes, bilingual Security Playbook, and the `Ctrl/Cmd+K` command palette. See [Engagement Workflows](docs/engagement-workflows.md).
 - **Command Palette** (`Ctrl/Cmd+K`): Keyboard-driven navigation across modules, workspaces, and reports, with selectable User-Agent and timeout presets.
 - **Bilingual Remediation Guide** (English/Myanmar): Embedded `go:embed` knowledge base mapping every finding rule ID to comprehensive explanations: mechanism, common developer mistakes, attack scenario walkthroughs, target file path and code location, before/after code diffs, deployment actions, verification instructions across stacks (Next.js, Laravel, Express, Nginx, Apache, Supabase). Auto-select detected tech stack tab, EN/မြန်မာ toggle, searchable Security Playbook view.
 - **Shared, Versioned Report Model**: Bounded redaction for persistence, individual exports, history exports, and consolidated engagement reports.
@@ -56,7 +57,7 @@ For development, run `wails dev` from the repository root after installing depen
 
 ## Documentation
 
-Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Headless CLI](docs/cli.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md), plus the [Latest Threat & CVE Feed](docs/cve-feed.md) guide. The complete documentation index is in [`docs/README.md`](docs/README.md).
+Start with the [User Guide](docs/user-guide.md). Feature-specific documentation is available for the [Port Scanner](docs/port-scanner.md), [Web Audit](docs/web-audit.md), [Headless CLI](docs/cli.md), [Subdomain Discovery](docs/subdomain-discovery.md), [Path Fuzzer](docs/path-fuzzer.md), [TLS Inspector](docs/tls-inspector.md), [DNS Intelligence](docs/dns-intelligence.md), [IP Information](docs/ip-information.md), and [History and Reports](docs/history-and-reports.md), plus the [Latest Threat & CVE Feed](docs/cve-feed.md) guide and the [Engagement Workflows](docs/engagement-workflows.md) guide. The complete documentation index is in [`docs/README.md`](docs/README.md).
 
 ## CI artifacts and releases (v1.1.5)
 
@@ -70,11 +71,11 @@ GitHub Actions (`.github/workflows/build.yml`) runs on pushes to `main`, pull re
 
 The macOS DMGs are currently unsigned and not notarized. On a clean Mac, open the DMG, drag **CodexaScanner.app** to **Applications**, then use **Open** from the Finder context menu the first time if Gatekeeper blocks the unsigned app.
 
-Frontend dependencies are pinned with a committed lockfile to reduce build drift. Download build artifacts from the Actions run or the GitHub Release assets. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
+Frontend dependencies are pinned with a committed lockfile to reduce build drift. The verified `v1.1.5` release is available at https://github.com/hidecard/codexa-scanner/releases/tag/v1.1.5. Download build artifacts from the Actions run or the GitHub Release assets. For clean-machine install/upgrade/uninstall and SQLite history data-retention verification steps, see [docs/release-verification.md](docs/release-verification.md).
 
 ## Repository topics
 
-`codexa-scanner`, `security`, `network-scanner`, `port-scanner`, `http-security`, `wails`, `golang`, `react`, `typescript`, `reconnaissance`
+`codexa-scanner`, `security`, `network-scanner`, `port-scanner`, `http-security`, `cve`, `cisa-kev`, `nvd`, `wails`, `golang`, `react`, `typescript`, `reconnaissance`
 
 ## Disclaimer
 
