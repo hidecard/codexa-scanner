@@ -17,7 +17,7 @@ For development, run `wails dev` from the repository root. For a Linux desktop b
 
 ## 3. Choose the right feature
 
-Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, select records across targets and scan types, and build consolidated engagement reports.
+Use **Dashboard** to review local scan summaries and the opt-in **Latest Threat & CVE Feed**. Use **Ports** when you need bounded TCP reachability checks for one approved host (with quick presets). Use **Web Audit** for passive HTTP/HTTPS headers, cookies, TLS metadata, findings, redirect chains, bounded security.txt/robots.txt inspectors, passive CORS/JWT metadata and sampled DB-error disclosure clues, request delay control, HTML/Markdown/JSON exports, and per-URL snapshot diff. Use **Subdomains** for CT names and optional bounded DNS wordlist checks. Use **Path Fuzzer** for authorized HEAD-only route observations with framework presets and request delay control. Use **TLS** for certificate and protocol inspection. Use **DNS** for record families and optional RDAP enrichment. Use **IP Info** for source-labeled classification, PTR, and public-IP RDAP metadata. Use **History** to review/search/filter local records, compare latest port/Web Audit snapshots, delete/clear/export history, select records across targets and scan types, and build consolidated engagement reports.
 
 Each feature guide explains its accepted input format, step-by-step workflow, output interpretation, limits, and troubleshooting:
 
@@ -29,6 +29,7 @@ Each feature guide explains its accepted input format, step-by-step workflow, ou
 - [DNS Intelligence](dns-intelligence.md)
 - [IP Information](ip-information.md)
 - [History and Reports](history-and-reports.md)
+- [Latest Threat & CVE Feed](cve-feed.md)
 
 ## 4. Recommended assessment workflow
 
@@ -40,15 +41,19 @@ Busy buttons are disabled during an operation. Backend failures are shown as act
 
 Private RFC1918, IPv6 ULA, and loopback HTTP targets are blocked by default and can be enabled once for authorized lab work. Link-local, multicast, unspecified, and reserved/special-use addresses remain blocked. Redirects are constrained to the submitted URL's hostname and allowed ports.
 
-## 6. Local history and privacy
+## 6. Latest Threat & CVE Feed
+
+The Dashboard feed is manual and opt-in. Click **Sync Latest CVEs** to retrieve CISA KEV and recent Critical/High NVD entries. Select a 7-day or 30-day view. The request timeout is 15 seconds per source. Feed results are stored in the local `cve_feed` SQLite table and remain available offline; a failed sync falls back to the existing cache and bundled advisory database. See [Latest Threat & CVE Feed](cve-feed.md) for details.
+
+## 7. Local history and privacy
 
 History is stored in the operating system user configuration directory under `CodexaScanner/history.sqlite`, capped at 2,000 entries. The database is not uploaded and is not encrypted. Before persistence and before JSON export, the app applies bounded redaction for embedded URL credentials, sensitive URL query/fragments, and sensitive result keys (password/secret/token/authorization/cookie/credential fields). This reduces accidental retention but is not a complete guarantee; URL paths, hostnames, banners, PTR names, RDAP fields, and other scan results can still contain sensitive information. Review and redact data before sharing. Close the app before manually deleting the database to clear local history.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 If a target is rejected, use the input format documented by that feature and remove unapproved URL syntax, credentials, or port values. If HTTP analysis fails, check the URL scheme, authorization, redirect scope, certificate trust, and private/lab option. `Inconclusive` TLS 1.0/1.1 results can be caused by local crypto policy, timeouts, or network errors and are not proof that the protocol is supported. If history is unavailable, scan modules remain usable but history-dependent views may be empty. Reports are indicators for review, not CVSS scores or proof of exploitability.
 
-## 8. Releases and installer verification (v1.1.5)
+## 9. Releases and installer verification (v1.1.5)
 
 - GitHub releases (tags `v*`) produce Linux `.deb`, Windows `.exe`, and macOS Intel/Apple Silicon `.dmg` artifacts via `.github/workflows/build.yml` (see [Release & Installer Verification](release-verification.md)).
 - CI hardening: workflow permissions are least-privilege (`contents: read`, release job only `contents: write`), Linux CI runs `go test -race ./...` + `go vet ./...`, Windows CI runs `go test ./...` + `go vet ./...`, and frontend dependencies are pinned to exact versions with a committed lockfile.

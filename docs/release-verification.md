@@ -18,6 +18,13 @@ This document covers GitHub release packaging (v1.1.5) and the required clean-ma
 3. Confirm GitHub Actions builds Linux DEB + Windows EXE + both macOS DMGs and publishes release assets.
 4. Perform clean-machine install/upgrade/uninstall verification (below) before announcing the release.
 
+## Latest Threat & CVE Feed verification
+
+1. Open Dashboard on a clean test profile and confirm no remote feed request is made until **Sync Latest CVEs** is clicked.
+2. Click **Sync Latest CVEs** with network access and verify that the result status reports cached records or source warnings without exposing target history.
+3. Restart with network access unavailable and confirm the cached feed remains visible. Confirm the bundled advisory matcher remains available even with an empty feed cache.
+4. If a test Web Audit identifies a matching product, confirm the Dashboard can show the affected-asset badge as a prioritization signal, not a vulnerability proof.
+
 ## Clean-machine verification (required for Phase 8)
 
 Perform on **fresh VMs/PCs** (no prior Codexa Scanner install/state unless testing upgrade path). Record OS version, artifact filename/checksum (if provided), steps, and results.

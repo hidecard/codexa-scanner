@@ -2,7 +2,7 @@
 
 ## What this module does
 
-History keeps scan results locally in SQLite and lets you inspect recent records. It compares the latest two port snapshots for a normalized target and reports new and removed ports. Web Audit snapshots can be compared for the same normalized URL when two comparable `http` records exist. Exports use a shared, versioned report model with bounded redaction.
+History keeps scan results locally in SQLite and lets you inspect recent records. The same database also stores the optional `cve_feed` cache used by the Dashboard threat feed; feed records are not uploaded and do not count toward the 2,000 scan-history record cap. It compares the latest two port snapshots for a normalized target and reports new and removed ports. Web Audit snapshots can be compared for the same normalized URL when two comparable `http` records exist. Exports use a shared, versioned report model with bounded redaction.
 
 ## Step-by-step: review history
 
@@ -34,6 +34,10 @@ JSON exports are written as a shared, versioned envelope (schema v1.0) including
 - Sensitive result keys (password, secret, token, authorization, cookie, credential, session, API key variants)
 
 Redaction is **not** a complete guarantee. Hostnames, paths, banners, PTR/RDAP fields, and other scan data may still be sensitive; review and redact manually before delivery. On supported Unix-style systems, the app attempts user-only file permissions for the history database.
+
+## CVE feed cache
+
+The Dashboard's **Sync Latest CVEs** action stores CISA KEV and recent NVD entries in the `cve_feed` table inside the same per-user database. This cache is separate from scan-history pruning and remains available offline. **Clear All History** removes scan-history records; it does not replace the bundled advisory database. Review the [Latest Threat & CVE Feed](cve-feed.md) guide for source, timeout, and matching behavior.
 
 ## Storage and privacy
 

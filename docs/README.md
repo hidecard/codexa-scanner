@@ -14,6 +14,7 @@ Codexa Scanner is a bounded, non-exploitative desktop assessment tool. Use it on
 - [DNS Intelligence](dns-intelligence.md) — DNS records, PTR, and optional RDAP metadata.
 - [IP Information](ip-information.md) — source-labeled address classification, PTR, and public-IP RDAP metadata.
 - [History and Reports](history-and-reports.md) — local retention, port diffs, and exports.
+- [Latest Threat & CVE Feed](cve-feed.md) — opt-in CISA KEV/NVD sync, SQLite caching, offline fallback, and scanned-asset matching.
 - [Release & Installer Verification (v1.1.5)](release-verification.md) — CI release workflow, v1.1.5 `.deb`/`.exe`/`.dmg` assets, and clean-machine install/upgrade/uninstall checks.
 
 Each feature page documents what the module does, what it does not do, and how to interpret its output.
