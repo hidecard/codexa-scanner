@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ type cliAuditOptions struct {
 	SARIFPath    string
 	AllowPrivate bool
 	Timeout      int
+	RulesPath    string
 }
 
 type stringListFlag []string
@@ -41,6 +43,7 @@ func parseAuditArgs(args []string, stderr io.Writer) (cliAuditOptions, error) {
 	set.StringVar(&options.SARIFPath, "sarif", "", "write a SARIF 2.1.0 report to this path (use - for stdout)")
 	set.BoolVar(&options.AllowPrivate, "allow-private", false, "allow private/loopback lab targets for this run")
 	set.IntVar(&options.Timeout, "timeout", options.Timeout, "per-request timeout in seconds (3–60)")
+	set.StringVar(&options.RulesPath, "rules", "", "path to custom rules file (YAML or JSON) for secret patterns, header rules, and path wordlists")
 	if err := set.Parse(args); err != nil {
 		return options, err
 	}
@@ -115,7 +118,6 @@ func writeCLIAuditReport(path string, results []BulkHeaderResult) ([]byte, error
 	if err := os.WriteFile(path, report, 0600); err != nil {
 		return nil, err
 	}
-	// Tighten permissions when replacing an existing file whose old mode was broader.
 	if err := os.Chmod(path, 0600); err != nil {
 		return nil, err
 	}
@@ -149,7 +151,18 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	app := NewApp()
-	results := app.AnalyzeBulkURLs(strings.Join(options.URLs, "\n"), 10, options.AllowPrivate, 0, 0, 0, "", options.Timeout, nil, "", "", "")
+
+	// Load custom rules if specified
+	var customRules *CustomRulesFile
+	if options.RulesPath != "" {
+		customRules, err = loadCustomRules(options.RulesPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "codexa-scanner audit: loading custom rules: %v\n", err)
+			return 2
+		}
+	}
+
+	results := app.AnalyzeBulkURLs(strings.Join(options.URLs, "\n"), 10, options.AllowPrivate, 0, 0, 0, "", options.Timeout, nil, "", "", "", customRules)
 	if len(results) == 0 {
 		fmt.Fprintln(stderr, "codexa-scanner audit: no valid targets were accepted")
 		return 2
@@ -228,16 +241,294 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		args = args[1:]
 	}
 	if command == "help" || command == "--help" || command == "-h" {
-		fmt.Fprintln(stdout, "Codexa Scanner headless mode\n\nUsage:\n  codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on high] [--json report.json] [--sarif report.sarif]\n  codexa-scanner audit --help\n\nExit codes: 0 no finding at/above threshold; 1 threshold reached; 2 usage, target, network, or report error.\nPrivate/loopback targets require the explicit --allow-private flag. Commands are bounded Web Audits; only use targets you are authorized to assess.")
+		fmt.Fprintln(stdout, "Codexa Scanner headless mode\n\nUsage:\n  codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on high] [--json report.json] [--sarif report.sarif] [--rules rules.yaml]\n  codexa-scanner import nmap-xml <file.xml> [--json report.json]\n  codexa-scanner import subdomains <file.txt> [--json report.json]\n  codexa-scanner inspect <url> [--method GET|HEAD|OPTIONS] [--header 'Key: Value'] [--allow-private] [--timeout 10] [--json -]\n  codexa-scanner audit --help\n  codexa-scanner import --help\n  codexa-scanner inspect --help\n\nExit codes: 0 no finding at/above threshold; 1 threshold reached; 2 usage, target, network, or report error.\nPrivate/loopback targets require the explicit --allow-private flag. Commands are bounded Web Audits; only use targets you are authorized to assess.")
 		return 0
+	}
+	if command == "import" {
+		if len(args) == 0 {
+			fmt.Fprintln(stderr, "usage: codexa-scanner import nmap-xml|subdomains <file> [--json report.json]")
+			return 2
+		}
+		subCommand := args[0]
+		args = args[1:]
+		if subCommand == "help" || subCommand == "--help" || subCommand == "-h" {
+			fmt.Fprintln(stdout, "Usage: codexa-scanner import nmap-xml <file.xml> [--json report.json|-]\n       codexa-scanner import subdomains <file.txt> [--json report.json|-]\n\nImports external tool output into local history.\n  nmap-xml: Parses nmap -oX XML output, stores port scans, and identifies HTTP/HTTPS endpoints.\n  subdomains: Imports newline-delimited subdomain lists from subfinder, amass, etc.\n\nExit codes: 0 success; 2 usage, file, or parse error.")
+			return 0
+		}
+		if subCommand == "nmap-xml" {
+			return runImportNmapXML(args, stdout, stderr)
+		}
+		if subCommand == "subdomains" {
+			return runImportSubdomains(args, stdout, stderr)
+		}
+		fmt.Fprintf(stderr, "unknown import command %q (use 'codexa-scanner import --help')\n", subCommand)
+		return 2
+	}
+	if command == "inspect" {
+		return runHTTPInspect(args, stdout, stderr)
 	}
 	if command != "audit" {
 		fmt.Fprintf(stderr, "unknown command %q (use 'codexa-scanner help')\n", command)
 		return 2
 	}
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(stdout, "Usage: codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on critical|high|medium|low|info] [--json report.json|-] [--sarif report.sarif|-] [--allow-private] [--timeout 3..60]\n\nExit codes: 0 below threshold; 1 threshold reached; 2 invalid input or execution/report error.")
+		fmt.Fprintln(stdout, "Usage: codexa-scanner audit --url <http(s)://target> [--url <target> ...] [--fail-on critical|high|medium|low|info] [--json report.json|-] [--sarif report.sarif|-] [--allow-private] [--timeout 3..60] [--rules rules.yaml]\n\nExit codes: 0 below threshold; 1 threshold reached; 2 invalid input or execution/report error.")
 		return 0
 	}
 	return runAudit(args, stdout, stderr)
+}
+
+func runHTTPInspect(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: codexa-scanner inspect <url> [--method GET|HEAD|OPTIONS] [--header 'Key: Value'] [--allow-private] [--timeout 10] [--json -]")
+		return 2
+	}
+	if args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprintln(stdout, "Usage: codexa-scanner inspect <url> [--method GET|HEAD|OPTIONS] [--header 'Key: Value'] [--allow-private] [--timeout 10] [--json -]\n\nInspects a URL and displays raw request/response headers and body (truncated to 64 KiB).\nOnly safe methods (GET, HEAD, OPTIONS) are allowed.\n\nExit codes: 0 success; 2 usage, network, or parse error.")
+		return 0
+	}
+
+	url := ""
+	method := "GET"
+	headers := make(map[string]string)
+	allowPrivate := false
+	timeout := 10
+	jsonPath := ""
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--method":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--method requires a value")
+				return 2
+			}
+			method = args[i+1]
+			i++
+		case "--header":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--header requires a 'Key: Value' value")
+				return 2
+			}
+			parts := strings.SplitN(args[i+1], ":", 2)
+			if len(parts) != 2 {
+				fmt.Fprintln(stderr, "--header format must be 'Key: Value'")
+				return 2
+			}
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			i++
+		case "--allow-private":
+			allowPrivate = true
+		case "--timeout":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--timeout requires a value")
+				return 2
+			}
+			var err error
+			timeout, err = strconv.Atoi(args[i+1])
+			if err != nil || timeout < 3 || timeout > 60 {
+				fmt.Fprintln(stderr, "--timeout must be between 3 and 60")
+				return 2
+			}
+			i++
+		case "--json":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--json requires a path")
+				return 2
+			}
+			jsonPath = args[i+1]
+			i++
+		default:
+			if url == "" {
+				url = args[i]
+			} else {
+				fmt.Fprintf(stderr, "unexpected argument: %s\n", args[i])
+				return 2
+			}
+		}
+	}
+
+	if url == "" {
+		fmt.Fprintln(stderr, "missing URL")
+		return 2
+	}
+
+	app := NewApp()
+	req := HTTPInspectorRequest{
+		URL:            url,
+		Method:         method,
+		Headers:        headers,
+		AllowPrivate:   allowPrivate,
+		TimeoutSeconds: timeout,
+	}
+	result := app.InspectHTTP(req)
+
+	if jsonPath != "" {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "codexa-scanner inspect: encoding JSON: %v\n", err)
+			return 2
+		}
+		if jsonPath == "-" {
+			fmt.Fprintln(stdout, string(data))
+		} else {
+			if err := os.WriteFile(jsonPath, data, 0600); err != nil {
+				fmt.Fprintf(stderr, "codexa-scanner inspect: writing JSON: %v\n", err)
+				return 2
+			}
+			fmt.Fprintf(stdout, "Inspection result written to %s\n", jsonPath)
+		}
+	} else {
+		if result.Error != "" {
+			fmt.Fprintf(stderr, "Error: %s\n", result.Error)
+			return 2
+		}
+		if result.Request != nil {
+			fmt.Fprintf(stdout, "REQUEST %s %s\n", result.Request.Method, result.Request.URL)
+			for k, v := range result.Request.Headers {
+				fmt.Fprintf(stdout, "%s: %s\n", k, v)
+			}
+			if result.Request.Body != "" {
+				fmt.Fprintln(stdout)
+				fmt.Fprintln(stdout, result.Request.Body)
+			}
+			fmt.Fprintln(stdout)
+		}
+		if result.Response != nil {
+			fmt.Fprintf(stdout, "RESPONSE HTTP/1.1 %d\n", result.Response.StatusCode)
+			for k, v := range result.Response.Headers {
+				fmt.Fprintf(stdout, "%s: %s\n", k, v)
+			}
+			fmt.Fprintln(stdout)
+			if result.Response.Body != "" {
+				fmt.Fprintln(stdout, result.Response.Body)
+			}
+			if result.Response.BodyTruncated {
+				fmt.Fprintln(stdout, "... (body truncated to 64 KiB)")
+			}
+		}
+	}
+	return 0
+}
+
+func runImportNmapXML(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: codexa-scanner import nmap-xml <file.xml> [--json report.json|-]")
+		return 2
+	}
+	jsonPath := ""
+	filePath := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--json" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--json requires a path")
+				return 2
+			}
+			jsonPath = args[i+1]
+			i++
+		} else if filePath == "" {
+			filePath = args[i]
+		} else {
+			fmt.Fprintf(stderr, "unexpected argument: %s\n", args[i])
+			return 2
+		}
+	}
+	if filePath == "" {
+		fmt.Fprintln(stderr, "missing input file")
+		return 2
+	}
+	app := NewApp()
+	result, err := app.ImportNmapXMLFile(filePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "codexa-scanner import nmap-xml: %v\n", err)
+		return 2
+	}
+	if jsonPath != "" {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "codexa-scanner import nmap-xml: encoding JSON: %v\n", err)
+			return 2
+		}
+		if jsonPath == "-" {
+			fmt.Fprintln(stdout, string(data))
+		} else {
+			if err := os.WriteFile(jsonPath, data, 0600); err != nil {
+				fmt.Fprintf(stderr, "codexa-scanner import nmap-xml: writing JSON: %v\n", err)
+				return 2
+			}
+			fmt.Fprintf(stdout, "Import result written to %s\n", jsonPath)
+		}
+	} else {
+		fmt.Fprintf(stdout, "Hosts processed: %d\n", result.HostsProcessed)
+		fmt.Fprintf(stdout, "Hosts up: %d\n", result.HostsUp)
+		fmt.Fprintf(stdout, "Open ports found: %d\n", result.PortsFound)
+		fmt.Fprintf(stdout, "HTTP/HTTPS endpoints: %d\n", result.WebEndpointsFound)
+		if len(result.Errors) > 0 {
+			fmt.Fprintln(stdout, "Errors:")
+			for _, e := range result.Errors {
+				fmt.Fprintf(stdout, "  %s\n", e)
+			}
+		}
+	}
+	return 0
+}
+
+func runImportSubdomains(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: codexa-scanner import subdomains <file.txt> [--json report.json|-]")
+		return 2
+	}
+	jsonPath := ""
+	filePath := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--json" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--json requires a path")
+				return 2
+			}
+			jsonPath = args[i+1]
+			i++
+		} else if filePath == "" {
+			filePath = args[i]
+		} else {
+			fmt.Fprintf(stderr, "unexpected argument: %s\n", args[i])
+			return 2
+		}
+	}
+	if filePath == "" {
+		fmt.Fprintln(stderr, "missing input file")
+		return 2
+	}
+	app := NewApp()
+	result, err := app.ImportSubdomainsFile(filePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "codexa-scanner import subdomains: %v\n", err)
+		return 2
+	}
+	if jsonPath != "" {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "codexa-scanner import subdomains: encoding JSON: %v\n", err)
+			return 2
+		}
+		if jsonPath == "-" {
+			fmt.Fprintln(stdout, string(data))
+		} else {
+			if err := os.WriteFile(jsonPath, data, 0600); err != nil {
+				fmt.Fprintf(stderr, "codexa-scanner import subdomains: writing JSON: %v\n", err)
+				return 2
+			}
+			fmt.Fprintf(stdout, "Import result written to %s\n", jsonPath)
+		}
+	} else {
+		fmt.Fprintf(stdout, "Subdomains loaded: %d\n", result.SubdomainsLoaded)
+		fmt.Fprintf(stdout, "Duplicates removed: %d\n", result.DuplicatesRemoved)
+		fmt.Fprintf(stdout, "Invalid entries: %d\n", result.InvalidEntries)
+		if len(result.Errors) > 0 {
+			fmt.Fprintln(stdout, "Errors:")
+			for _, e := range result.Errors {
+				fmt.Fprintf(stdout, "  %s\n", e)
+			}
+		}
+	}
+	return 0
 }

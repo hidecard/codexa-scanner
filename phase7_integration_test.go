@@ -33,7 +33,7 @@ func TestIntegrationRedirectScopeBlocksCrossHostWithLocalFixture(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(start.URL, client, nil, HTTPRequestProfile{})
+	result := analyzeURL(start.URL, client, nil, HTTPRequestProfile{}, nil)
 	if result.Error == "" || !strings.Contains(strings.ToLower(result.Error), "redirect") {
 		t.Fatalf("expected redirect scope error, got %+v", result)
 	}
@@ -54,11 +54,11 @@ func TestIntegrationSQLitePersistenceReopenAndDiffWithTempDir(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	app := &App{historyDB: db}
-	if err := app.saveHistory("port", "scanme.nmap.org", []PortFinding{{Port: 22, Service: "ssh"}, {Port: 80, Service: "http"}}); err != nil {
+	if err := app.saveHistory("port", "scanme.nmap.org", []PortFinding{{Port: 22, Service: "ssh"}, {Port: 80, Service: "http"}}, 0); err != nil {
 		t.Fatalf("save1: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := app.saveHistory("port", "scanme.nmap.org", []PortFinding{{Port: 22, Service: "ssh"}, {Port: 443, Service: "https"}}); err != nil {
+	if err := app.saveHistory("port", "scanme.nmap.org", []PortFinding{{Port: 22, Service: "ssh"}, {Port: 443, Service: "https"}}, 0); err != nil {
 		t.Fatalf("save2: %v", err)
 	}
 	_ = db.Close()

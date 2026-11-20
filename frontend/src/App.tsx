@@ -22,11 +22,30 @@ import {
   PauseScans,
   ResumeScans,
   IsScansPaused,
+  CreateWorkspace,
+  ListWorkspaces,
+  DeleteWorkspace,
+  GetWorkspaceScans,
+  UpdateHistoryWorkspace,
+  GetFindingTags,
+  GetFindingNotes,
+  SetFindingTag,
+  SetFindingNote,
+  DeleteFindingTag,
+  DeleteFindingNote,
+  ImportNmapXML,
+  ImportNmapXMLFile,
+  ImportNmapXMLToWorkspace,
+  ImportSubdomains,
+  ImportSubdomainsFile,
+  ImportSubdomainsToWorkspace,
+  InspectHTTP,
+  ReplayHTTPRequest,
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
 
-type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook';
+type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about';
 type GuideLang = 'en' | 'my';
 
 function shellQuote(value: string): string {
@@ -89,6 +108,8 @@ export default function App() {
   const [cidrScopeConfirmed, setCidrScopeConfirmed] = useState(false);
   const [cidrWorkers, setCidrWorkers] = useState(10);
   const [cidrTimeoutMs, setCidrTimeoutMs] = useState(800);
+  const [cidrRps, setCidrRps] = useState(0);
+  const [cidrJitterMs, setCidrJitterMs] = useState(0);
   const [isCIDRScanning, setIsCIDRScanning] = useState(false);
   const [cidrProgress, setCidrProgress] = useState(0);
   const [cidrResults, setCidrResults] = useState<main.CIDRSweepResult | null>(null);
@@ -156,6 +177,38 @@ export default function App() {
   const [findingDrawerId, setFindingDrawerId] = useState<string | null>(null);
   const selectedHistoryEntries = historyEntries.filter((entry) => selectedHistoryIds.includes(entry.id));
   const [detectedTechStack, setDetectedTechStack] = useState('Next.js');
+
+  // Phase 15 - Import & HTTP Inspector
+  const [importNmapFile, setImportNmapFile] = useState<File | null>(null);
+  const [importNmapText, setImportNmapText] = useState('');
+  const [importSubdomainsFile, setImportSubdomainsFile] = useState<File | null>(null);
+  const [importSubdomainsText, setImportSubdomainsText] = useState('');
+  const [importWorkspaceID, setImportWorkspaceID] = useState<number | null>(null);
+  const [nmapImportResult, setNmapImportResult] = useState<main.NmapImportResult | null>(null);
+  const [subdomainImportResult, setSubdomainImportResult] = useState<main.SubdomainImportResult | null>(null);
+  const [importError, setImportError] = useState('');
+
+  const [inspectURL, setInspectURL] = useState('');
+  const [inspectMethod, setInspectMethod] = useState<'GET' | 'HEAD' | 'OPTIONS'>('GET');
+  const [inspectHeaders, setInspectHeaders] = useState('');
+  const [inspectAllowPrivate, setInspectAllowPrivate] = useState(false);
+  const [inspectTimeout, setInspectTimeout] = useState(10);
+  const [inspectResult, setInspectResult] = useState<main.HTTPInspectorResponse | null>(null);
+  const [inspectError, setInspectError] = useState('');
+  const [isInspecting, setIsInspecting] = useState(false);
+
+  // Phase 16 - Workspaces & Analyst Triage
+  const [workspaces, setWorkspaces] = useState<main.Workspace[]>([]);
+  const [selectedWorkspaceID, setSelectedWorkspaceID] = useState<number | null>(null);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspaceDesc, setNewWorkspaceDesc] = useState('');
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [findingTags, setFindingTags] = useState<main.FindingTag[]>([]);
+  const [findingNotes, setFindingNotes] = useState<main.FindingNote[]>([]);
+  const [newTag, setNewTag] = useState<'verified' | 'false_positive' | 'needs_review' | 'accepted_risk'>('verified');
+  const [newNote, setNewNote] = useState('');
+  const [tagNoteHistoryID, setTagNoteHistoryID] = useState<number | null>(null);
+  const [tagNoteFindingID, setTagNoteFindingID] = useState<string>('');
 
   const errorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
@@ -237,6 +290,15 @@ export default function App() {
 
   useEffect(() => {
     void (async () => { try { setRemediationKB(await GetRemediationKnowledge()); } catch {} })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const ws = await ListWorkspaces();
+        setWorkspaces(ws);
+      } catch {}
+    })();
   }, []);
 
   useEffect(() => {
@@ -332,7 +394,9 @@ export default function App() {
         Number(cidrEndPort),
         Number(cidrWorkers),
         Number(cidrTimeoutMs),
-        confirmedScope
+        confirmedScope,
+        Number(cidrRps),
+        Number(cidrJitterMs)
       );
 
       if (status !== 'STARTED') {
@@ -512,6 +576,206 @@ export default function App() {
     setActiveTab('analyzer');
   };
 
+  // Phase 15 - Import handlers
+  const handleImportNmap = async (useWorkspace: boolean) => {
+    setImportError('');
+    const file = importNmapFile;
+    const text = importNmapText;
+    if (!file && !text.trim()) {
+      setImportError('Select a file or paste Nmap XML content');
+      return;
+    }
+    try {
+      let result: main.NmapImportResult;
+      if (file) {
+        result = useWorkspace && importWorkspaceID ? await ImportNmapXMLToWorkspace(await file.text(), importWorkspaceID) : await ImportNmapXMLFile(file.name);
+      } else {
+        result = useWorkspace && importWorkspaceID ? await ImportNmapXMLToWorkspace(text, importWorkspaceID) : await ImportNmapXML(text);
+      }
+      setNmapImportResult(result);
+      if (result.Errors?.length) setImportError(result.Errors.join('; '));
+      await refreshHistory();
+    } catch (error) {
+      setImportError(errorMessage(error, 'Import failed'));
+    }
+  };
+
+  const handleImportSubdomains = async (useWorkspace: boolean) => {
+    setImportError('');
+    const file = importSubdomainsFile;
+    const text = importSubdomainsText;
+    if (!file && !text.trim()) {
+      setImportError('Select a file or paste subdomain list');
+      return;
+    }
+    try {
+      let result: main.SubdomainImportResult;
+      if (file) {
+        result = useWorkspace && importWorkspaceID ? await ImportSubdomainsToWorkspace(await file.text(), importWorkspaceID) : await ImportSubdomainsFile(file.name);
+      } else {
+        result = useWorkspace && importWorkspaceID ? await ImportSubdomainsToWorkspace(text, importWorkspaceID) : await ImportSubdomains(text);
+      }
+      setSubdomainImportResult(result);
+      if (result.Errors?.length) setImportError(result.Errors.join('; '));
+      await refreshHistory();
+    } catch (error) {
+      setImportError(errorMessage(error, 'Import failed'));
+    }
+  };
+
+  // Phase 15 - HTTP Inspector handlers
+  const handleInspect = async () => {
+    if (!inspectURL.trim()) {
+      setInspectError('URL is required');
+      return;
+    }
+    setInspectError('');
+    setIsInspecting(true);
+    try {
+      const headers = parseCustomHeaders(inspectHeaders);
+      const req: main.HTTPInspectorRequest = {
+        url: inspectURL.trim(),
+        method: inspectMethod,
+        headers,
+        allowPrivate: inspectAllowPrivate,
+        timeoutSeconds: inspectTimeout,
+      };
+      const result = await InspectHTTP(req);
+      setInspectResult(result);
+      if (result.Error) setInspectError(result.Error);
+    } catch (error) {
+      setInspectError(errorMessage(error, 'Inspection failed'));
+    } finally {
+      setIsInspecting(false);
+    }
+  };
+
+  const handleReplay = async (modifications: Partial<main.HTTPInspectorRequest>) => {
+    if (!inspectResult?.Request) return;
+    setInspectError('');
+    setIsInspecting(true);
+    try {
+      const originalReq: main.HTTPInspectorRequest = {
+        url: inspectResult.Request.URL,
+        method: inspectResult.Request.Method,
+        headers: inspectResult.Request.Headers,
+        allowPrivate: inspectAllowPrivate,
+        timeoutSeconds: inspectTimeout,
+      };
+      const result = await ReplayHTTPRequest(originalReq, modifications as main.HTTPInspectorRequest);
+      setInspectResult(result);
+      if (result.Error) setInspectError(result.Error);
+    } catch (error) {
+      setInspectError(errorMessage(error, 'Replay failed'));
+    } finally {
+      setIsInspecting(false);
+    }
+  };
+
+  // Phase 16 - Workspace handlers
+  const loadWorkspaces = async () => {
+    try {
+      const ws = await ListWorkspaces();
+      setWorkspaces(ws);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to load workspaces'));
+    }
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (!newWorkspaceName.trim()) {
+      setWorkspaceError('Workspace name is required');
+      return;
+    }
+    setWorkspaceError('');
+    try {
+      const id = await CreateWorkspace(newWorkspaceName.trim(), newWorkspaceDesc.trim());
+      setNewWorkspaceName('');
+      setNewWorkspaceDesc('');
+      await loadWorkspaces();
+      setSelectedWorkspaceID(id);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to create workspace'));
+    }
+  };
+
+  const handleDeleteWorkspace = async (id: number) => {
+    if (!window.confirm('Delete this workspace? This will unassign all associated scan history entries.')) return;
+    setWorkspaceError('');
+    try {
+      await DeleteWorkspace(id);
+      await loadWorkspaces();
+      if (selectedWorkspaceID === id) setSelectedWorkspaceID(null);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to delete workspace'));
+    }
+  };
+
+  const handleAssignHistoryToWorkspace = async (historyID: number) => {
+    if (selectedWorkspaceID === null) return;
+    try {
+      await UpdateHistoryWorkspace(historyID, selectedWorkspaceID);
+      await refreshHistory();
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to assign to workspace'));
+    }
+  };
+
+  const loadFindingTagsNotes = async (historyID: number) => {
+    setTagNoteHistoryID(historyID);
+    try {
+      const [tags, notes] = await Promise.all([GetFindingTags(historyID), GetFindingNotes(historyID)]);
+      setFindingTags(tags);
+      setFindingNotes(notes);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to load tags/notes'));
+    }
+  };
+
+  const handleSetFindingTag = async (findingID: string, tag: string) => {
+    if (tagNoteHistoryID === null) return;
+    try {
+      await SetFindingTag(tagNoteHistoryID, findingID, tag);
+      const tags = await GetFindingTags(tagNoteHistoryID);
+      setFindingTags(tags);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to set tag'));
+    }
+  };
+
+  const handleDeleteFindingTag = async (findingID: string) => {
+    if (tagNoteHistoryID === null) return;
+    try {
+      await DeleteFindingTag(tagNoteHistoryID, findingID);
+      const tags = await GetFindingTags(tagNoteHistoryID);
+      setFindingTags(tags);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to delete tag'));
+    }
+  };
+
+  const handleSetFindingNote = async (findingID: string, note: string) => {
+    if (tagNoteHistoryID === null) return;
+    try {
+      await SetFindingNote(tagNoteHistoryID, findingID, note);
+      const notes = await GetFindingNotes(tagNoteHistoryID);
+      setFindingNotes(notes);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to set note'));
+    }
+  };
+
+  const handleDeleteFindingNote = async (findingID: string) => {
+    if (tagNoteHistoryID === null) return;
+    try {
+      await DeleteFindingNote(tagNoteHistoryID, findingID);
+      const notes = await GetFindingNotes(tagNoteHistoryID);
+      setFindingNotes(notes);
+    } catch (error) {
+      setWorkspaceError(errorMessage(error, 'Failed to delete note'));
+    }
+  };
+
   const getGradeColor = (grade: string) => {
     if (grade.startsWith('A')) return 'bg-emerald-950 text-emerald-400 border-emerald-700';
     if (grade === 'B') return 'bg-sky-950 text-sky-400 border-sky-700';
@@ -653,7 +917,7 @@ ${rows || '<p>No results.</p>'}
           </div>
         </div>
 
-        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[72%] lg:grid-cols-4 xl:grid-cols-8">
+        <nav aria-label="Scanner modules" className="grid w-full grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1.5 sm:grid-cols-4 lg:w-auto lg:max-w-[72%] lg:grid-cols-4 xl:grid-cols-10">
           <button
             type="button"
             onClick={() => { setActiveTab('dashboard'); void refreshHistory(); }}
@@ -685,9 +949,9 @@ ${rows || '<p>No results.</p>'}
             Web Audit
           </button>
           {([
-            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'],
+            ['subdomains', 'Subdomains'], ['fuzzer', 'Path Fuzzer'], ['tls', 'TLS'], ['dns', 'DNS'], ['ip', 'IP Info'], ['history', 'History'], ['playbook', 'Playbook'], ['workspaces', 'Workspaces'], ['import', 'Import'], ['inspector', 'Inspector'], ['about', 'About'],
           ] as const).map(([tab, label]) => (
-            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab as ActiveTab); if (tab === 'history') void refreshHistory(); }}
+            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => { setActiveTab(tab as ActiveTab); if (tab === 'history') void refreshHistory(); if (tab === 'workspaces') void loadWorkspaces(); }}
               className={`rounded-lg px-2.5 py-2 text-[11px] font-semibold transition-colors sm:px-3 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
               {label}
             </button>
@@ -1098,6 +1362,34 @@ ${rows || '<p>No results.</p>'}
                   onChange={(e) => setCidrTimeoutMs(Number(e.target.value))}
                   disabled={isCIDRScanning}
                   className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">RPS (0 = unlimited, max 50)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={cidrRps}
+                  onChange={(e) => setCidrRps(Number(e.target.value))}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  title="Requests per second cap for port connections"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Jitter (ms, 0-5000)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={5000}
+                  value={cidrJitterMs}
+                  onChange={(e) => setCidrJitterMs(Number(e.target.value))}
+                  disabled={isCIDRScanning}
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                  title="Random extra delay per connection to avoid rate limits"
                 />
               </div>
             </div>
@@ -1851,12 +2143,21 @@ ${rows || '<p>No results.</p>'}
             <input autoFocus value={paletteQuery} onChange={(e)=>setPaletteQuery(e.target.value)} placeholder="Go to module or action... (Ctrl/Cmd+K)" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
             <div className="mt-2 max-h-72 space-y-1 overflow-auto">
               {(([
-                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],
+                ['Dashboard','dashboard'],['Ports','scanner'],['Web Audit','analyzer'],['Subdomains','subdomains'],['Path Fuzzer','fuzzer'],['TLS','tls'],['DNS','dns'],['IP Info','ip'],['History','history'],['Playbook','playbook'],['Workspaces','workspaces'],['Import','import'],['Inspector','inspector'],['About','about'],
               ] as [string,ActiveTab][]).filter(([l])=>l.toLowerCase().includes(paletteQuery.toLowerCase()))).map(([label,tab])=>(
                 <button key={tab} type="button" onClick={()=>{ setActiveTab(tab); if(tab==='history') void refreshHistory(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{label} <span className="text-xs text-slate-500">module</span></button>
               ))}
               <button type="button" onClick={()=>{ void refreshHistory(); setActiveTab('history'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Refresh History <span className="text-xs text-slate-500">action</span></button>
               <button type="button" onClick={()=>{ void togglePause(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{isPaused?'Resume scans':'Pause scans'} <span className="text-xs text-slate-500">action</span></button>
+              <hr className="border-slate-800 my-1" />
+              <span className="px-3 py-1 text-[11px] text-slate-500">Workspaces</span>
+              <button type="button" onClick={()=>{ setActiveTab('workspaces'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Open Workspaces tab <span className="text-xs text-slate-500">action</span></button>
+              <button type="button" onClick={()=>{ setActiveTab('workspaces'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Create Workspace <span className="text-xs text-slate-500">action</span></button>
+              <button type="button" onClick={()=>{ setActiveTab('workspaces'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Assign History to Workspace <span className="text-xs text-slate-500">action</span></button>
+              <hr className="border-slate-800 my-1" />
+              <span className="px-3 py-1 text-[11px] text-slate-500">Import & Inspector</span>
+              <button type="button" onClick={()=>{ setActiveTab('import'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">Import Nmap XML / Subdomains <span className="text-xs text-slate-500">action</span></button>
+              <button type="button" onClick={()=>{ setActiveTab('inspector'); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">HTTP Inspector & Replay <span className="text-xs text-slate-500">action</span></button>
             </div>
             <div className="mt-2 text-[11px] text-slate-500">Esc to close</div>
           </div>
@@ -1883,6 +2184,8 @@ ${rows || '<p>No results.</p>'}
               </div>
               {!g ? <p className="mt-4 text-sm text-slate-400">No embedded guide for this finding ID.</p> : (
                 <div className="mt-4 space-y-4 text-sm">
+                  {/* Finding Tags & Notes Section */}
+                  <FindingTagsNotes findingId={findingDrawerId} />
                   <section className="rounded border border-slate-800 bg-slate-950/50 p-3"><div className="flex flex-wrap gap-2 text-xs"><span className="rounded bg-rose-950/60 px-2 py-1 text-rose-300">Severity: {g.severity || 'review'}</span><span className="rounded bg-sky-950/60 px-2 py-1 text-sky-300">Priority: {g.priority || 'P2'}</span><span className="rounded bg-amber-950/60 px-2 py-1 text-amber-300">Change risk: {g.changeRisk || 'unknown'}</span></div></section>
                   <section><h4 className="font-semibold text-emerald-300">Mechanism</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'mechanism')}</p></section>
                   <section><h4 className="font-semibold text-emerald-300">Root cause</h4><p className="mt-1 whitespace-pre-wrap text-slate-300">{guideText(g,'rootCause')}</p></section>
@@ -1912,11 +2215,465 @@ ${rows || '<p>No results.</p>'}
                   {!!g.relatedFindings?.length && <section><h4 className="font-semibold text-emerald-300">Related finding IDs</h4><div className="mt-1 flex flex-wrap gap-1">{g.relatedFindings.map((x:string)=><span key={x} className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300">{x}</span>)}</div></section>}
                   {!!g.references?.length && <section><h4 className="font-semibold text-emerald-300">Further reading</h4><ul className="mt-1 list-disc pl-5 text-slate-300">{g.references.map((x:string,i:number)=><li key={i}>{x}</li>)}</ul></section>}
                 </div>
-              )}
+)}
             </div>
           </div>
         );
       })()}
+
+      {/* ========================================= */}
+      {/* TAB: WORKSPACES */}
+      {/* ========================================= */}
+      {activeTab === 'workspaces' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h2 className="text-sm font-bold">Engagement Workspaces</h2>
+            <p className="text-xs text-slate-400">Organize scan history by client/engagement. Assign history entries to workspaces for isolated multi-client management.</p>
+            
+            <div className="flex flex-wrap gap-3">
+              <input
+                value={newWorkspaceName}
+                onChange={(e) => setNewWorkspaceName(e.target.value)}
+                placeholder="Workspace name (e.g., Client Corp - Q4 2026)"
+                className="flex-1 min-w-[200px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              />
+              <input
+                value={newWorkspaceDesc}
+                onChange={(e) => setNewWorkspaceDesc(e.target.value)}
+                placeholder="Description (optional)"
+                className="flex-1 min-w-[200px] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              />
+              <button onClick={handleCreateWorkspace} disabled={!newWorkspaceName.trim()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">Create Workspace</button>
+            </div>
+            
+            {workspaceError && <p className="text-rose-400 text-xs">{workspaceError}</p>}
+            
+            {workspaces.length === 0 ? (
+              <p className="text-slate-500 text-sm">No workspaces yet. Create one above.</p>
+            ) : (
+              <div className="space-y-2">
+                {workspaces.map((ws) => (
+                  <div key={ws.id} className={`flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg border p-3 ${selectedWorkspaceID === ws.id ? 'border-emerald-600 bg-emerald-950/20' : 'border-slate-800 bg-slate-900'}`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-semibold text-slate-100">{ws.name}</span>
+                        {selectedWorkspaceID === ws.id && <span className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] text-white">Active</span>}
+                      </div>
+                      {ws.description && <div className="mt-1 text-xs text-slate-400 truncate">{ws.description}</div>}
+                      <div className="mt-1 text-[11px] text-slate-500">Created: {new Date(ws.createdAt).toLocaleString()}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setSelectedWorkspaceID(selectedWorkspaceID === ws.id ? null : ws.id)}
+                        className={`rounded border px-3 py-1.5 text-xs font-semibold ${selectedWorkspaceID === ws.id ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+                      >
+                        {selectedWorkspaceID === ws.id ? 'Deselect' : 'Select'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteWorkspace(ws.id)}
+                        className="rounded border border-rose-800 bg-rose-950/30 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-950"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedWorkspaceID && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+              <h3 className="text-sm font-bold">Assign History Entries to Selected Workspace</h3>
+              <p className="text-xs text-slate-400">Select history entries below and assign them to the active workspace.</p>
+              <div className="space-y-2 max-h-96 overflow-auto">
+                {historyEntries.map((entry) => (
+                  <div key={entry.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 p-2 sm:flex-row sm:justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedHistoryIds.includes(entry.id)}
+                        onChange={() => toggleHistorySelection(entry.id)}
+                        className="accent-emerald-500"
+                      />
+                      <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-emerald-300">{entry.scanType}</span>
+                      <span className="truncate text-sm text-slate-200">{entry.target}</span>
+                    </div>
+                    <button
+                      onClick={() => handleAssignHistoryToWorkspace(entry.id)}
+                      disabled={selectedWorkspaceID === null}
+                      className="shrink-0 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700 disabled:opacity-40"
+                    >
+                      Assign
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedWorkspaceID && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+              <h3 className="text-sm font-bold">Workspace Scan History</h3>
+              <button onClick={async () => { const scans = await GetWorkspaceScans(selectedWorkspaceID!, 50); setHistoryEntries(scans); }} className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700">Load Workspace Scans</button>
+              <div className="space-y-2 max-h-96 overflow-auto">
+                {historyEntries.map((entry) => (
+                  <details key={entry.id} className="rounded-lg border border-slate-800 bg-slate-900">
+                    <summary className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between p-3 cursor-pointer">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-emerald-300">{entry.scanType}</span>
+                        <span className="truncate text-sm text-slate-200">{entry.target}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">{new Date(entry.createdAt).toLocaleString()}</div>
+                    </summary>
+                    <pre className="m-3 whitespace-pre-wrap break-all rounded bg-slate-950 p-3 text-[10px] text-slate-300">{formatHistoryResult(entry.result)}</pre>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* TAB: IMPORT (Nmap XML & Subdomains) */}
+      {/* ========================================= */}
+      {activeTab === 'import' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h2 className="text-sm font-bold">Import External Tool Output</h2>
+            <p className="text-xs text-slate-400">Import Nmap XML (-oX) and newline-delimited subdomain lists (subfinder, amass) into local history. Results are stored and can be assigned to workspaces.</p>
+          </div>
+
+          {/* Nmap XML Import */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold">Nmap XML Import</h3>
+            <div className="space-y-3">
+              <label className="block text-xs text-slate-400">File or Paste XML</label>
+              <input
+                type="file"
+                accept=".xml"
+                onChange={(e) => e.target.files?.[0] && setImportNmapFile(e.target.files[0])}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              />
+              <textarea
+                value={importNmapText}
+                onChange={(e) => setImportNmapText(e.target.value)}
+                placeholder="Or paste Nmap XML content here..."
+                rows={6}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500 font-mono text-[11px]"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => handleImportNmap(false)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Import to Default</button>
+                {selectedWorkspaceID && (
+                  <button onClick={() => handleImportNmap(true)} className="rounded-lg border border-emerald-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-950/20">Import to Selected Workspace</button>
+                )}
+              </div>
+              {importError && <p className="text-rose-400 text-xs">{importError}</p>}
+            </div>
+            {nmapImportResult && (
+              <div className="mt-4 rounded-lg bg-slate-950 p-3 space-y-1 text-xs">
+                <div className="font-semibold text-slate-200">Import Result</div>
+                <div className="grid grid-cols-4 gap-2 text-slate-300">
+                  <span>Hosts processed: <strong>{nmapImportResult.hostsProcessed}</strong></span>
+                  <span>Hosts up: <strong>{nmapImportResult.hostsUp}</strong></span>
+                  <span>Open ports: <strong>{nmapImportResult.portsFound}</strong></span>
+                  <span>Web endpoints: <strong>{nmapImportResult.webEndpointsFound}</strong></span>
+                </div>
+                {nmapImportResult.errors?.length && <p className="mt-2 text-rose-400">Errors: {nmapImportResult.errors.join('; ')}</p>}
+              </div>
+            )}
+          </div>
+
+          {/* Subdomain Import */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold">Subdomain List Import</h3>
+            <p className="text-xs text-slate-400">Import newline-delimited subdomains (e.g., from subfinder, amass). Each line: subdomain.example.com</p>
+            <div className="space-y-3">
+              <label className="block text-xs text-slate-400">File or Paste List</label>
+              <input
+                type="file"
+                accept=".txt"
+                onChange={(e) => e.target.files?.[0] && setImportSubdomainsFile(e.target.files[0])}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              />
+              <textarea
+                value={importSubdomainsText}
+                onChange={(e) => setImportSubdomainsText(e.target.value)}
+                placeholder="Or paste subdomains here (one per line)..."
+                rows={6}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500 font-mono text-[11px]"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => handleImportSubdomains(false)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Import to Default</button>
+                {selectedWorkspaceID && (
+                  <button onClick={() => handleImportSubdomains(true)} className="rounded-lg border border-emerald-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-950/20">Import to Selected Workspace</button>
+                )}
+              </div>
+              {importError && <p className="text-rose-400 text-xs">{importError}</p>}
+            </div>
+            {subdomainImportResult && (
+              <div className="mt-4 rounded-lg bg-slate-950 p-3 space-y-1 text-xs">
+                <div className="font-semibold text-slate-200">Import Result</div>
+                <div className="grid grid-cols-4 gap-2 text-slate-300">
+                  <span>Loaded: <strong>{subdomainImportResult.subdomainsLoaded}</strong></span>
+                  <span>Duplicates removed: <strong>{subdomainImportResult.duplicatesRemoved}</strong></span>
+                  <span>Invalid entries: <strong>{subdomainImportResult.invalidEntries}</strong></span>
+                </div>
+                {subdomainImportResult.errors?.length && <p className="mt-2 text-rose-400">Errors: {subdomainImportResult.errors.join('; ')}</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* TAB: HTTP INSPECTOR & REPLAY */}
+      {/* ========================================= */}
+      {activeTab === 'inspector' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h2 className="text-sm font-bold">Raw HTTP Inspector & Bounded Replay</h2>
+            <p className="text-xs text-slate-400">Inspect raw request/response headers and body for any URL. Replay with modified headers/method within the same host/port scope. Safe methods only (GET, HEAD, OPTIONS).</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold">Inspect URL</h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="col-span-2 sm:col-span-3">
+                <label className="block text-xs text-slate-400 mb-1">URL</label>
+                <input
+                  value={inspectURL}
+                  onChange={(e) => setInspectURL(e.target.value)}
+                  placeholder="https://example.com/path?query=value"
+                  className="min-w-0 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Method</label>
+                <select value={inspectMethod} onChange={(e) => setInspectMethod(e.target.value as 'GET' | 'HEAD' | 'OPTIONS')} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none focus:border-emerald-500">
+                  <option value="GET">GET</option>
+                  <option value="HEAD">HEAD</option>
+                  <option value="OPTIONS">OPTIONS</option>
+                </select>
+              </div>
+              <div className="col-span-2 sm:col-span-3">
+                <label className="block text-xs text-slate-400 mb-1">Headers (one per line: Key: Value)</label>
+                <textarea
+                  value={inspectHeaders}
+                  onChange={(e) => setInspectHeaders(e.target.value)}
+                  placeholder="Authorization: Bearer token\nX-Custom-Header: value"
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500 font-mono text-[11px]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Timeout (s)</label>
+                <input
+                  type="number"
+                  min={3}
+                  max={60}
+                  value={inspectTimeout}
+                  onChange={(e) => setInspectTimeout(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2.5 text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+                  <input type="checkbox" checked={inspectAllowPrivate} onChange={(e) => setInspectAllowPrivate(e.target.checked)} className="accent-emerald-500" />
+                  <span>Allow private/loopback targets</span>
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={handleInspect} disabled={isInspecting || !inspectURL.trim()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40">{isInspecting ? 'Inspecting...' : 'Inspect'}</button>
+                <button onClick={() => { setInspectURL(''); setInspectHeaders(''); setInspectResult(null); setInspectError(''); }} className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-700">Clear</button>
+              </div>
+              {inspectError && <p className="text-rose-400 text-xs">{inspectError}</p>}
+            </div>
+          </div>
+
+          {inspectResult && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+              <h3 className="text-sm font-bold">Inspection Result</h3>
+              <div className="space-y-3">
+                {inspectResult.Request && (
+                  <details className="rounded-lg border border-slate-800 bg-slate-950">
+                    <summary className="p-3 cursor-pointer font-semibold text-emerald-300">REQUEST {inspectResult.Request.Method} {inspectResult.Request.URL}</summary>
+                    <div className="px-3 pb-3 space-y-1 font-mono text-[11px] text-slate-300">
+                      {Object.entries(inspectResult.Request.Headers).map(([k, v]) => (
+                        <div key={k} className="border-b border-slate-800 py-1"><span className="text-slate-500">{k}:</span> {v}</div>
+                      ))}
+                      {inspectResult.Request.Body && (
+                        <div className="mt-2 pt-2 border-t border-slate-800">
+                          <div className="text-xs text-slate-500">Body:</div>
+                          <pre className="mt-1 whitespace-pre-wrap break-all text-slate-200">{inspectResult.Request.Body}</pre>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
+                {inspectResult.Response && (
+                  <details className="rounded-lg border border-slate-800 bg-slate-950">
+                    <summary className="p-3 cursor-pointer font-semibold text-emerald-300">RESPONSE HTTP/1.1 {inspectResult.Response.StatusCode} {inspectResult.Response.BodyTruncated ? '(body truncated to 64 KiB)' : ''}</summary>
+                    <div className="px-3 pb-3 space-y-1 font-mono text-[11px] text-slate-300">
+                      {Object.entries(inspectResult.Response.Headers).map(([k, v]) => (
+                        <div key={k} className="border-b border-slate-800 py-1"><span className="text-slate-500">{k}:</span> {v}</div>
+                      ))}
+                      <div className="mt-2 pt-2 border-t border-slate-800">
+                        <div className="text-xs text-slate-500">Body:</div>
+                        <pre className="mt-1 whitespace-pre-wrap break-all text-slate-200">{inspectResult.Response.Body || '(empty)'}</pre>
+                      </div>
+                      {inspectResult.Response.TLS && (
+                        <div className="mt-2 pt-2 border-t border-slate-800 text-xs">
+                          <div className="text-sky-400">TLS: {inspectResult.Response.TLS.Version} {inspectResult.Response.TLS.CipherSuite} (verified: {inspectResult.Response.TLS.Verified ? 'yes' : 'no'})</div>
+                          <div className="text-slate-400">Subject: {inspectResult.Response.TLS.Subject}</div>
+                          <div className="text-slate-400">Issuer: {inspectResult.Response.TLS.Issuer}</div>
+                          <div className="text-slate-400">Expires: {inspectResult.Response.TLS.ExpiresAt} ({inspectResult.Response.TLS.DaysRemaining} days)</div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+
+              <div className="pt-4 border-t border-slate-800">
+                <h4 className="text-xs font-semibold text-slate-400 mb-2">Bounded Replay (same host/port scope)</h4>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <button
+                    onClick={() => handleReplay({ method: 'HEAD' })}
+                    className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700"
+                  >
+                    Replay as HEAD
+                  </button>
+                  <button
+                    onClick={() => handleReplay({ method: 'OPTIONS' })}
+                    className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700"
+                  >
+                    Replay as OPTIONS
+                  </button>
+                  <button
+                    onClick={() => handleReplay({ headers: { ...parseCustomHeaders(inspectHeaders), 'X-Test-Replay': 'true' } })}
+                    className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700"
+                  >
+                    Replay + Test Header
+                  </button>
+                  <button
+                    onClick={() => handleReplay({ headers: { ...parseCustomHeaders(inspectHeaders), 'User-Agent': 'Codexa Replay Test' } })}
+                    className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold hover:bg-slate-700"
+                  >
+                    Replay + Custom UA
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* TAB: ABOUT */}
+      {/* ========================================= */}
+      {activeTab === 'about' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <div className="flex items-center gap-4">
+              <img src="/logo.svg" alt="" className="h-16 w-16 rounded-xl ring-1 ring-emerald-500/30 shadow-sm shadow-emerald-950/40" />
+              <div>
+                <h2 className="text-xl font-bold tracking-[0.14em] text-emerald-400">CODEXA SCANNER</h2>
+                <p className="text-sm text-slate-400">Authorized Network & Web Security Assessment</p>
+                <p className="text-xs text-slate-500 mt-1">Version 1.1.4</p>
+              </div>
+            </div>
+            <hr className="border-slate-800" />
+            <p className="text-sm text-slate-300">
+              Codexa Scanner is a desktop application for authorized network reconnaissance and HTTP security-header inspection.
+              Built with Go, Wails v2, React, and TypeScript. Designed for defensive security work, education, and authorized testing only.
+            </p>
+            <p className="text-xs text-slate-500">
+              Developed by <a href="https://arkaryan.net/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">H!D3-C4rD</a>
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold text-emerald-300">Core Modules</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                ['Port Scanner', 'Concurrent TCP port checks with capped workers, live progress, cancellation, and deterministic target resolution. Active protocol fingerprinting (SSH, SMTP, TLS, HTTP, Redis) with version extraction.'],
+                ['CIDR /24 Sweep', 'Bounded subnet live-host/port sweep with scope confirmation, reverse DNS, pause/resume, RPS/jitter rate limiting, JSON export, and history persistence.'],
+                ['Web Audit', 'Bulk HTTP/HTTPS checks with redirect-chain disclosure, headers/cookies/TLS/CSP diagnostics, security.txt/robots.txt inspectors, client-side exposure audit (secrets, source maps, endpoints, DOM sinks, reflected params), GraphQL/OpenAPI introspection, cloud storage bucket exposure, rate-limit/cache-control audit, webhook/OAuth posture, attack surface mapper (forms, params, scripts, storage).'],
+                ['Subdomain Discovery', 'Certificate Transparency enumeration with optional DNS wordlist. 15+ cloud provider takeover clues (GitHub Pages, Vercel, Netlify, AWS, Azure, Firebase, etc.) with CNAME resolution status and remediation guidance.'],
+                ['Path Fuzzer', 'HEAD-only bounded path checks with framework/env/API presets, request delay, RPS/jitter rate limiting, status/Content-Length baseline comparison.'],
+                ['TLS Inspector', 'Certificate trust/expiry/SANs, negotiated protocol/cipher, HTTP/2 ALPN, HTTP/3 Alt-Svc, TLS 1.2 legacy cipher probes. TLS 1.0/1.1 reports Supported/Not supported/Inconclusive.'],
+                ['DNS/Email Intelligence', 'A, AAAA, MX, NS, TXT, SPF, DMARC, PTR records. RDAP registration metadata. Email policy parser: DKIM (12 selectors), SPF, DMARC, overall rating (strong/moderate/weak/missing).'],
+                ['IP Information', 'Source-labeled public/private/special-use classification, reverse DNS, public-IP RDAP metadata. No geolocation.'],
+                ['History & Reports', 'SQLite history (2,000 records), latest-two port diff, cross-target/scan-type selection, engagement JSON/PDF reports, bounded redaction, search/filter/delete/clear. Workspaces for multi-client isolation. Analyst finding tags (Verified/False Positive/Needs Review/Accepted Risk) and notes.'],
+              ].map(([title, desc]) => (
+                <div key={title} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                  <h4 className="font-semibold text-slate-100">{title}</h4>
+                  <p className="mt-1 text-xs text-slate-400">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold text-emerald-300">CLI & Automation</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                <h4 className="font-semibold text-slate-100">Headless Web Audit CLI</h4>
+                <p className="mt-1 text-xs text-slate-400"><code>audit --url https://example.com --fail-on high --json report.json --sarif report.sarif</code></p>
+                <p className="mt-1 text-xs text-slate-400">Reuses target validation and bounded checks. Redacted JSON/SARIF 2.1.0. CI exit codes (0/1/2). <code>--allow-private</code> for lab targets.</p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                <h4 className="font-semibold text-slate-100">Custom Request Headers & Proxy</h4>
+                <p className="mt-1 text-xs text-slate-400">Authorization, Cookie, X-API-Key with automatic redaction. HTTP/SOCKS5 proxy routing (http/https/socks5/socks5h).</p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                <h4 className="font-semibold text-slate-100">Extensible Rule Packs</h4>
+                <p className="mt-1 text-xs text-slate-400"><code>--rules rules.yaml</code> for custom secret patterns, header rules, path wordlists. YAML/JSON supported.</p>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                <h4 className="font-semibold text-slate-100">External Tool Import</h4>
+                <p className="mt-1 text-xs text-slate-400">Nmap XML (<code>-oX</code>) and newline-delimited subdomain lists (subfinder, amass) with workspace targeting.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h3 className="text-sm font-bold text-emerald-300">Key Features</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                'Strict scope controls: per-scan target validation, redirect-chain pinning, cross-host blocking, private-target opt-in',
+                'Global rate limiting: RPS caps (0-50), random jitter (0-5000ms), pause/resume for Web Audit, Path Fuzzer, CIDR sweep',
+                'Command palette (Ctrl/Cmd+K): fast navigation across modules, workspaces, reports, and actions',
+                'Bilingual remediation guide (EN/မြန်မာ): mechanism, common mistakes, attack scenarios, file/location, before/after diffs, deploy/verify across 6 stacks',
+                'Workspace persistence: SQLite workspaces table with foreign keys, CRUD operations, history assignment, workspace-scoped views',
+                'Analyst triage: finding tags (Verified/False Positive/Needs Review/Accepted Risk) and notes persisted in SQLite',
+                'HTTP Inspector & Replay: raw request/response, TLS details, bounded replay (GET/HEAD/OPTIONS with modified headers within scope)',
+                'Shared versioned report model with bounded redaction for credentials, URL query/fragments, sensitive result keys',
+                'Cross-platform desktop: Wails v2 (Go + React + TypeScript), Linux .deb, Windows .exe, macOS .dmg (unsigned)',
+              ].map((feature, i) => (
+                <div key={i} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                  <p className="text-xs text-slate-300">{feature}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-rose-900/60 bg-rose-950/30 p-4 space-y-2">
+            <h3 className="text-sm font-bold text-rose-300">⚠ Authorized Use Only</h3>
+            <p className="text-xs text-slate-400">
+              Use only against systems you own or have explicit written permission to assess. Port scanning and HTTP requests may be logged, trigger defensive controls, or violate policy or law when performed without authorization. All checks are passive and non-exploitative; results are indicators for review, not proof of exploitability or a substitute for a professional assessment.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2 text-xs text-slate-500">
+            <p>Built with: Go 1.22+, Wails v2, React 18, TypeScript, Vite, Tailwind CSS</p>
+            <p>Licensed for authorized testing, education, and defensive security work.</p>
+            <p>Repository: <a href="https://github.com/hidecard/codexa-scanner" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 underline">github.com/hidecard/codexa-scanner</a></p>
+          </div>
+        </div>
+      )}
 
       </main>
       <footer className="mt-8 border-t border-slate-800 pt-3 text-center text-[11px] tracking-wide text-slate-500">

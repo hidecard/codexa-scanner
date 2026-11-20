@@ -1,0 +1,74 @@
+# Codexa Scanner — Custom Rules & Signature Pack Example (YAML)
+#
+# Load with:  codexa-scanner audit --url https://example.test --rules rules-example.yaml
+#
+# All regex patterns are validated against ReDoS heuristics and compiled with Go's
+# RE2 engine (linear-time guarantee). Patterns with nested quantifiers, excessive
+# alternations, or too many groups are rejected at load time.
+#
+# Bounded limits apply: max 50 secret patterns, 50 header rules, 20 path wordlists,
+# 200 paths per wordlist, 500 chars per pattern/path.
+
+secretPatterns:
+  - id: "custom-openai-proj-key"
+    name: "OpenAI project API key"
+    pattern: "\\b(?:sk|sk-proj)-[A-Za-z0-9_-]{20,}\\b"
+    severity: "high"
+    description: "Matches OpenAI-style project API keys in client-side bundles."
+  - id: "custom-generic-api-key"
+    name: "Generic API key assignment"
+    pattern: "(?i)\\b(api[_-]?key|apikey|access[_-]?token)\\s*[:=]\\s*[\"']?[A-Za-z0-9_-]{16,}"
+    severity: "high"
+    description: "Matches common API key assignment patterns in scripts."
+  - id: "custom-jwt-clue"
+    name: "JWT token clue"
+    pattern: "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b"
+    severity: "medium"
+    description: "Matches JWT-shaped tokens in script content (redacted preview only)."
+
+headerRules:
+  - id: "custom-x-debug-enabled"
+    name: "Debug header enabled"
+    header: "X-Debug"
+    match: "(?i)^true$|^1$|^on$"
+    severity: "medium"
+    description: "Response advertises debug mode via X-Debug header."
+  - id: "custom-server-discloses-version"
+    name: "Server header discloses version"
+    header: "Server"
+    match: "\\d+\\.\\d+(?:\\.\\d+)?"
+    severity: "info"
+    description: "Server header includes a numeric version token."
+  - id: "custom-strict-transport-security-short"
+    name: "Short max-age HSTS"
+    header: "Strict-Transport-Security"
+    match: "max-age\\s*=\\s*[1-9]\\d{0,3}([^0-9]|$)"
+    severity: "low"
+    description: "HSTS max-age is set to a short duration (less than ~1 hour)."
+
+pathWordlists:
+  - id: "custom-admin-paths"
+    name: "Custom admin panel paths"
+    paths:
+      - "/admin"
+      - "/admin/"
+      - "/administrator"
+      - "/wp-admin"
+      - "/manager"
+      - "/console"
+      - "/control-panel"
+      - "/manage"
+      - "/backend"
+      - "/cms"
+  - id: "custom-config-paths"
+    name: "Configuration & env paths"
+    paths:
+      - "/.env"
+      - "/.git/config"
+      - "/.git/HEAD"
+      - "/config.json"
+      - "/config.php"
+      - "/configuration.json"
+      - "/settings.json"
+      - "/application.yml"
+      - "/application.yaml"

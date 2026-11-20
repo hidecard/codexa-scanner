@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"unicode"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gopkg.in/yaml.v3"
 	"net/url"
 
 	"github.com/go-pdf/fpdf"
@@ -61,6 +63,35 @@ type AdvisoryMatch struct {
 	Source          string        `json:"source"` // "banner", "server-header", "powered-by", "technology", "tls"
 }
 
+type CustomSecretPattern struct {
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	Pattern     string `json:"pattern" yaml:"pattern"`
+	Severity    string `json:"severity" yaml:"severity"`
+	Description string `json:"description" yaml:"description"`
+}
+
+type CustomHeaderRule struct {
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	Header      string `json:"header" yaml:"header"`
+	Match       string `json:"match" yaml:"match"`
+	Severity    string `json:"severity" yaml:"severity"`
+	Description string `json:"description" yaml:"description"`
+}
+
+type CustomPathWordlist struct {
+	ID     string   `json:"id" yaml:"id"`
+	Name   string   `json:"name" yaml:"name"`
+	Paths  []string `json:"paths" yaml:"paths"`
+}
+
+type CustomRulesFile struct {
+	SecretPatterns []CustomSecretPattern `json:"secretPatterns" yaml:"secretPatterns"`
+	HeaderRules    []CustomHeaderRule    `json:"headerRules" yaml:"headerRules"`
+	PathWordlists  []CustomPathWordlist  `json:"pathWordlists" yaml:"pathWordlists"`
+}
+
 var (
 	advisoryData     []AdvisoryEntry
 	advisoryDataOnce sync.Once
@@ -80,6 +111,111 @@ func loadAdvisoryData() ([]AdvisoryEntry, error) {
 		}
 	})
 	return advisoryData, advisoryLoadErr
+}
+
+func loadCustomRules(path string) (*CustomRulesFile, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read custom rules file: %w", err)
+	}
+	// File size limit: 100KB
+	if len(data) > 100*1024 {
+		return nil, fmt.Errorf("custom rules file too large (max 100KB): %d bytes", len(data))
+	}
+	var rules CustomRulesFile
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".yaml" || ext == ".yml" {
+		if err := yaml.Unmarshal(data, &rules); err != nil {
+			return nil, fmt.Errorf("failed to parse YAML custom rules: %w", err)
+		}
+	} else if ext == ".json" {
+		if err := json.Unmarshal(data, &rules); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON custom rules: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported custom rules file format (use .yaml, .yml, or .json): %s", path)
+	}
+
+	// Validate and compile secret patterns
+	if len(rules.SecretPatterns) > 50 {
+		return nil, fmt.Errorf("too many secret patterns (max 50): %d", len(rules.SecretPatterns))
+	}
+	for i, sp := range rules.SecretPatterns {
+		if len(sp.Pattern) > 500 {
+			return nil, fmt.Errorf("secret pattern %d too long (max 500 chars): %d", i, len(sp.Pattern))
+		}
+		if err := validateRegexPattern(sp.Pattern); err != nil {
+			return nil, fmt.Errorf("secret pattern %d (%s) invalid: %w", i, sp.ID, err)
+		}
+		// Pre-compile to verify it works and cache for performance
+		_, err := regexp.Compile(sp.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("secret pattern %d (%s) failed to compile: %w", i, sp.ID, err)
+		}
+	}
+
+	// Validate header rules
+	if len(rules.HeaderRules) > 50 {
+		return nil, fmt.Errorf("too many header rules (max 50): %d", len(rules.HeaderRules))
+	}
+	for i, hr := range rules.HeaderRules {
+		if len(hr.Match) > 500 {
+			return nil, fmt.Errorf("header rule %d match pattern too long (max 500 chars): %d", i, len(hr.Match))
+		}
+		if err := validateRegexPattern(hr.Match); err != nil {
+			return nil, fmt.Errorf("header rule %d (%s) match pattern invalid: %w", i, hr.ID, err)
+		}
+		_, err := regexp.Compile(hr.Match)
+		if err != nil {
+			return nil, fmt.Errorf("header rule %d (%s) match pattern failed to compile: %w", i, hr.ID, err)
+		}
+	}
+
+	// Validate path wordlists
+	if len(rules.PathWordlists) > 20 {
+		return nil, fmt.Errorf("too many path wordlists (max 20): %d", len(rules.PathWordlists))
+	}
+	for i, pw := range rules.PathWordlists {
+		if len(pw.Paths) > 200 {
+			return nil, fmt.Errorf("path wordlist %d (%s) too many paths (max 200): %d", i, pw.ID, len(pw.Paths))
+		}
+		for j, p := range pw.Paths {
+			if len(p) > 500 {
+				return nil, fmt.Errorf("path wordlist %d (%s) path %d too long (max 500 chars): %d", i, pw.ID, j, len(p))
+			}
+		}
+	}
+
+	return &rules, nil
+}
+
+// validateRegexPattern checks for patterns that could cause catastrophic backtracking (ReDoS).
+// Go's regexp engine uses RE2 (linear-time guarantee), but we still reject obviously dangerous patterns.
+func validateRegexPattern(pattern string) error {
+	// Reject patterns with nested quantifiers on overlapping character classes
+	// e.g., (a+)+, (a*)*, (.+)+ - these can cause exponential backtracking in backtracking engines
+	// Note: RE2 handles these safely, but we reject them for defense in depth and portability
+	dangerousPatterns := []string{
+		`\(\?\:.*[+*]\)[+*]`, // (?:...)+ or (?:...)*
+		`\([^)]*[+*]\)[+*]`,   // (...) + or *
+		`\(\?[^)]*[+*]\)[+*]`, // (?...) + or *
+	}
+	for _, dp := range dangerousPatterns {
+		if matched, _ := regexp.MatchString(dp, pattern); matched {
+			return fmt.Errorf("pattern contains potentially catastrophic nested quantifier")
+		}
+	}
+	// Limit pattern complexity: reject patterns with excessive alternation or grouping
+	if strings.Count(pattern, "|") > 20 {
+		return fmt.Errorf("pattern has too many alternations (max 20)")
+	}
+	if strings.Count(pattern, "(") > 30 {
+		return fmt.Errorf("pattern has too many capture groups (max 30)")
+	}
+	return nil
 }
 
 func extractVersionFromBanner(banner string) (product, version string) {
@@ -552,9 +688,14 @@ func (a *App) shutdown(context.Context) {
 // ==========================================
 
 type PortFinding struct {
-	Port    int    `json:"port"`
-	Service string `json:"service"`
-	Banner  string `json:"banner"`
+	Port              int      `json:"port"`
+	Service           string   `json:"service"`
+	Banner            string   `json:"banner"`
+	Protocol          string   `json:"protocol,omitempty"`           // e.g., "TLS", "SSH", "SMTP", "HTTP", "Redis"
+	Version           string   `json:"version,omitempty"`            // Extracted version string
+	Fingerprint       string   `json:"fingerprint,omitempty"`        // Additional fingerprint details
+	TLSSupported      bool     `json:"tlsSupported,omitempty"`       // Whether TLS is supported on this port
+	TLSCipher         string   `json:"tlsCipher,omitempty"`          // Negotiated TLS cipher
 }
 
 var commonPorts = map[int]string{
@@ -570,7 +711,7 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
 
-	// HTTP/HTTPS port á€–á€¼á€…á€ºá€”á€±á€›á€„á€º HEAD request á€œá€¾á€™á€ºá€¸á€•á€­á€¯á€·á€•á€¼á€®á€¸ Server header á€šá€°á€™á€šá€º
+	// HTTP/HTTPS port - send HEAD request
 	if port == 80 || port == 8080 || port == 8000 {
 		fmt.Fprintf(conn, "HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", target)
 	}
@@ -582,7 +723,7 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 	}
 
 	raw := string(buf[:n])
-	// HTTP response á€–á€¼á€…á€ºá€›á€„á€º Server header á€€á€­á€¯á€•á€² á€žá€”á€·á€ºá€žá€”á€·á€ºá€œá€±á€¸ á€†á€½á€²á€‘á€¯á€á€ºá€™á€šá€º
+	// HTTP response - extract Server header
 	if strings.HasPrefix(raw, "HTTP/") {
 		for _, line := range strings.Split(raw, "\r\n") {
 			if strings.HasPrefix(strings.ToLower(line), "server:") {
@@ -592,12 +733,157 @@ func grabBanner(ctx context.Context, conn net.Conn, target string, port int) str
 		return strings.Split(raw, "\r\n")[0]
 	}
 
-	// á€á€á€¼á€¬á€¸ Banner á€á€½á€± (SSH, FTP, SMTP) á€¡á€á€½á€€á€º á€•á€‘á€™á€†á€¯á€¶á€¸á€…á€¬á€€á€¼á€±á€¬á€„á€ºá€¸á€€á€­á€¯ á€šá€°á€™á€šá€º
+	// Non-HTTP Banner (SSH, FTP, SMTP)
 	clean := strings.TrimSpace(strings.Split(raw, "\n")[0])
 	if len(clean) > 80 {
 		clean = clean[:80] + "..."
 	}
 	return clean
+}
+
+func grabBannerWithProtocol(ctx context.Context, conn net.Conn, target string, port int) (string, string, string, bool, string) {
+	// First get basic banner
+	banner := grabBanner(ctx, conn, target, port)
+
+	var protocol, version string
+	var tlsSupported bool
+	var tlsCipher string
+
+	// Protocol-specific active probing
+	switch port {
+	case 22: // SSH
+		protocol, version, _ = probeSSH(ctx, conn, target)
+	case 25, 587, 465: // SMTP
+		protocol, version, _ = probeSMTP(ctx, conn, target)
+	case 443, 8443: // HTTPS
+		protocol, version, _, tlsSupported, tlsCipher = probeTLS(ctx, conn, target)
+	case 80, 8080, 8000: // HTTP
+		protocol, version, _ = probeHTTP(ctx, conn, target)
+	case 6379: // Redis
+		protocol, version, _ = probeRedis(ctx, conn, target)
+	}
+
+	return banner, protocol, version, tlsSupported, tlsCipher
+}
+
+func probeSSH(ctx context.Context, conn net.Conn, target string) (string, string, string) {
+	// SSH banner is typically sent immediately on connect
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return "", "", ""
+	}
+	raw := string(buf[:n])
+	// SSH banner format: SSH-2.0-OpenSSH_8.9p1 Ubuntu-3
+	if strings.HasPrefix(raw, "SSH-") {
+		parts := strings.Split(raw, "-")
+		if len(parts) >= 3 {
+			version := strings.Join(parts[2:], "-")
+			return "SSH", strings.TrimSpace(version), "SSH banner: " + strings.TrimSpace(raw)
+		}
+		return "SSH", "", "SSH banner: " + strings.TrimSpace(raw)
+	}
+	return "", "", ""
+}
+
+func probeSMTP(ctx context.Context, conn net.Conn, target string) (string, string, string) {
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// Send EHLO
+	_, err := fmt.Fprintf(conn, "EHLO %s\r\n", target)
+	if err != nil {
+		return "", "", ""
+	}
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return "", "", ""
+	}
+	raw := string(buf[:n])
+	// Parse EHLO response for version
+	lines := strings.Split(raw, "\n")
+	var version string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "220 ") || strings.HasPrefix(line, "250 ") {
+			if version == "" {
+				version = strings.TrimSpace(line)
+			}
+		}
+	}
+	return "SMTP", version, "SMTP EHLO response: " + strings.TrimSpace(raw)
+}
+
+func probeTLS(ctx context.Context, conn net.Conn, target string) (string, string, string, bool, string) {
+	// Perform TLS handshake to get version and cipher
+	tlsConfig := &tls.Config{
+		ServerName:         target,
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS10,
+		MaxVersion:         tls.VersionTLS13,
+	}
+	tlsConn := tls.Client(conn, tlsConfig)
+	err := tlsConn.HandshakeContext(ctx)
+	if err != nil {
+		return "", "", "", false, ""
+	}
+	defer tlsConn.Close()
+	state := tlsConn.ConnectionState()
+	version := tlsVersionName(state.Version)
+	cipher := tls.CipherSuiteName(state.CipherSuite)
+	return "TLS", version, "TLS " + version + " " + cipher, true, cipher
+}
+
+func probeHTTP(ctx context.Context, conn net.Conn, target string) (string, string, string) {
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// Send OPTIONS request
+	_, err := fmt.Fprintf(conn, "OPTIONS * HTTP/1.1\r\nHost: %s\r\n\r\n", target)
+	if err != nil {
+		return "", "", ""
+	}
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return "", "", ""
+	}
+	raw := string(buf[:n])
+	// Parse response for Server header and Allow header
+	var server, allow string
+	for _, line := range strings.Split(raw, "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "server:") {
+			server = strings.TrimSpace(line)
+		}
+		if strings.HasPrefix(strings.ToLower(line), "allow:") {
+			allow = strings.TrimSpace(line)
+		}
+	}
+	details := "HTTP OPTIONS response"
+	if server != "" {
+		details += "; " + server
+	}
+	if allow != "" {
+		details += "; " + allow
+	}
+	return "HTTP", server, details
+}
+
+func probeRedis(ctx context.Context, conn net.Conn, target string) (string, string, string) {
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// Send PING command (Redis protocol: *1\r\n$4\r\nPING\r\n)
+	_, err := fmt.Fprintf(conn, "*1\r\n$4\r\nPING\r\n")
+	if err != nil {
+		return "", "", ""
+	}
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return "", "", ""
+	}
+	raw := string(buf[:n])
+	// Redis PONG response: +PONG\r\n
+	if strings.Contains(raw, "PONG") {
+		return "Redis", "PONG", "Redis PING: +PONG"
+	}
+	return "Redis", "", "Redis response: " + strings.TrimSpace(raw)
 }
 
 func normalizePortScanTarget(raw string) (string, error) {
@@ -784,7 +1070,7 @@ func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, wor
 			findingsMu.Lock()
 			snapshot := append([]PortFinding(nil), scanFindings...)
 			findingsMu.Unlock()
-			if err := a.saveHistory("port", target, snapshot); err != nil {
+			if err := a.saveHistory("port", target, snapshot, 0); err != nil {
 				log.Printf("Codexa Scanner: saving port scan history: %v", err)
 			}
 		}
@@ -823,19 +1109,27 @@ func (a *App) runPortScan(scan *portScan, target string, startPort, endPort, wor
 					return
 				}
 				address := net.JoinHostPort(resolvedTarget, strconv.Itoa(port))
-				conn, err := dialer.DialContext(scan.ctx, "tcp", address)
-				if err == nil {
-					banner := grabBanner(scan.ctx, conn, target, port)
-					svc := commonPorts[port]
-					if svc == "" {
-						svc = "unknown"
-					}
-					finding := PortFinding{Port: port, Service: svc, Banner: banner}
-					findingsMu.Lock()
-					scanFindings = append(scanFindings, finding)
-					findingsMu.Unlock()
-					a.emitScanEvent("port:found", finding)
+conn, err := dialer.DialContext(scan.ctx, "tcp", address)
+			if err == nil {
+				banner, protocol, version, tlsSupported, tlsCipher := grabBannerWithProtocol(scan.ctx, conn, target, port)
+				svc := commonPorts[port]
+				if svc == "" {
+					svc = "unknown"
 				}
+				finding := PortFinding{
+					Port:         port,
+					Service:      svc,
+					Banner:       banner,
+					Protocol:     protocol,
+					Version:      version,
+					TLSSupported: tlsSupported,
+					TLSCipher:    tlsCipher,
+				}
+				findingsMu.Lock()
+				scanFindings = append(scanFindings, finding)
+				findingsMu.Unlock()
+				a.emitScanEvent("port:found", finding)
+			}
 
 				curr := atomic.AddInt64(&scannedCount, 1)
 				if scan.ctx.Err() == nil && (curr%25 == 0 || int(curr) == totalPorts) {
@@ -898,7 +1192,7 @@ type cidrHostResult struct {
 }
 
 // StartCIDRSweep starts a bounded /24 CIDR port sweep with explicit scope confirmation.
-func (a *App) StartCIDRSweep(cidr string, startPort, endPort, workers, timeoutMs int, scopeConfirmed bool) string {
+func (a *App) StartCIDRSweep(cidr string, startPort, endPort, workers, timeoutMs int, scopeConfirmed bool, rps, jitterMs int) string {
 	if a == nil {
 		return "Scanner unavailable"
 	}
@@ -924,6 +1218,8 @@ func (a *App) StartCIDRSweep(cidr string, startPort, endPort, workers, timeoutMs
 	}
 	workers, timeout := normalizePortScanLimits(endPort-startPort+1, workers, timeoutMs)
 
+	rate := ScanRateControl{RPS: rps, JitterMs: jitterMs}.normalized()
+
 	parent := a.ctx
 	if parent == nil {
 		parent = context.Background()
@@ -941,11 +1237,11 @@ func (a *App) StartCIDRSweep(cidr string, startPort, endPort, workers, timeoutMs
 	a.scanMu.Unlock()
 
 	a.emitScanEvent("scan:status", string(scanStatusRunning))
-	go a.runCIDRSweep(scan, cidr, startPort, endPort, workers, timeout)
+	go a.runCIDRSweep(scan, cidr, startPort, endPort, workers, timeout, rate)
 	return "STARTED"
 }
 
-func (a *App) runCIDRSweep(scan *portScan, cidr string, startPort, endPort, workers int, timeout time.Duration) {
+func (a *App) runCIDRSweep(scan *portScan, cidr string, startPort, endPort, workers int, timeout time.Duration, rate ScanRateControl) {
 	_, ipNet, _ := net.ParseCIDR(cidr)
 	// Generate all IPs in the /24
 	baseIP := ipNet.IP.To4()
@@ -1030,23 +1326,36 @@ func (a *App) runCIDRSweep(scan *portScan, cidr string, startPort, endPort, work
 				}
 				cancelResolve()
 
-				// Scan ports on this live host
-				var hostPorts []PortFinding
-				for port := startPort; port <= endPort; port++ {
-					if scan.ctx.Err() != nil {
-						break
-					}
-					a.waitIfPaused(scan.ctx)
+// Scan ports on this live host
+			var hostPorts []PortFinding
+			var lastRate time.Time
+			for port := startPort; port <= endPort; port++ {
+				if scan.ctx.Err() != nil {
+					break
+				}
+				var ok bool
+				lastRate, ok = a.waitForRateSlot(scan.ctx, lastRate, rate)
+				if !ok {
+					break
+				}
 
-					address := net.JoinHostPort(ipStr, strconv.Itoa(port))
+address := net.JoinHostPort(ipStr, strconv.Itoa(port))
 					conn, err := dialer.DialContext(scan.ctx, "tcp", address)
 					if err == nil {
-						banner := grabBanner(scan.ctx, conn, ipStr, port)
+						banner, protocol, version, tlsSupported, tlsCipher := grabBannerWithProtocol(scan.ctx, conn, ipStr, port)
 						svc := commonPorts[port]
 						if svc == "" {
 							svc = "unknown"
 						}
-						finding := PortFinding{Port: port, Service: svc, Banner: banner}
+						finding := PortFinding{
+							Port:         port,
+							Service:      svc,
+							Banner:       banner,
+							Protocol:     protocol,
+							Version:      version,
+							TLSSupported: tlsSupported,
+							TLSCipher:    tlsCipher,
+						}
 						hostPorts = append(hostPorts, finding)
 						a.emitScanEvent("port:found", finding)
 						conn.Close()
@@ -1128,7 +1437,7 @@ func (a *App) finishCIDRSweep(scan *portScan, cidr string, status scanStatus, re
 	}
 
 	if status == scanStatusCompleted {
-		if err := a.saveHistory("cidr-sweep", cidr, sweepResult); err != nil {
+		if err := a.saveHistory("cidr-sweep", cidr, sweepResult, 0); err != nil {
 			log.Printf("Codexa Scanner: saving CIDR sweep history: %v", err)
 		}
 	}
@@ -1168,6 +1477,13 @@ type BulkHeaderResult struct {
 	TLS             *TLSDetails           `json:"tls,omitempty"`
 	SecurityTxt     *WebResourceInspector `json:"securityTxt,omitempty"`
 	RobotsTxt       *WebResourceInspector `json:"robotsTxt,omitempty"`
+	GraphQL         *WebResourceInspector `json:"graphql,omitempty"`
+	Swagger         *WebResourceInspector `json:"swagger,omitempty"`
+	OpenAPI         *WebResourceInspector `json:"openapi,omitempty"`
+	CloudStorage    []CloudStorageFinding `json:"cloudStorage,omitempty"`
+	RateLimitAudit  *RateLimitAuditResult `json:"rateLimitAudit,omitempty"`
+	WebhookOAuth    *WebhookOAuthAudit    `json:"webhookOAuth,omitempty"`
+	AttackSurface   *AttackSurfaceSummary `json:"attackSurface,omitempty"`
 	ClientSideAudit *ClientSideAudit      `json:"clientSideAudit,omitempty"`
 	Findings        []SecurityFinding     `json:"findings"`
 	AdvisoryMatches []AdvisoryMatch       `json:"advisoryMatches,omitempty"`
@@ -1181,6 +1497,90 @@ type WebResourceInspector struct {
 	Body       string `json:"body,omitempty"`
 	Error      string `json:"error,omitempty"`
 	Note       string `json:"note,omitempty"`
+}
+
+// CloudStorageFinding captures publicly listable cloud storage bucket exposure.
+type CloudStorageFinding struct {
+	URL           string `json:"url"`
+	Provider      string `json:"provider"`
+	Bucket        string `json:"bucket,omitempty"`
+	Listable      bool   `json:"listable"`
+	StatusCode    int    `json:"statusCode"`
+	Error         string `json:"error,omitempty"`
+	Evidence      string `json:"evidence,omitempty"`
+	Remediation   string `json:"remediation,omitempty"`
+}
+
+// RateLimitAuditResult captures rate-limiting and cache-control header posture.
+type RateLimitAuditResult struct {
+	HasRateLimitHeaders  bool   `json:"hasRateLimitHeaders"`
+	RateLimitHeaders     string `json:"rateLimitHeaders,omitempty"`
+	HasRetryAfter        bool   `json:"hasRetryAfter"`
+	RetryAfter           string `json:"retryAfter,omitempty"`
+	CacheControl         string `json:"cacheControl,omitempty"`
+	MissingNoStore       bool   `json:"missingNoStore"`
+	IsSensitiveEndpoint  bool   `json:"isSensitiveEndpoint"`
+	Note                 string `json:"note,omitempty"`
+}
+
+// WebhookOAuthAudit captures exposed webhook URLs and OAuth configuration parameters.
+type WebhookOAuthAudit struct {
+	Webhooks []WebhookFinding `json:"webhooks,omitempty"`
+	OAuth    []OAuthFinding   `json:"oauth,omitempty"`
+}
+
+type WebhookFinding struct {
+	Platform  string `json:"platform"`
+	URL       string `json:"url"`
+	Redacted  string `json:"redacted"`
+	Note      string `json:"note,omitempty"`
+}
+
+type OAuthFinding struct {
+	Parameter string `json:"parameter"`
+	Value     string `json:"value,omitempty"`
+	Redacted  string `json:"redacted"`
+	Context   string `json:"context,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
+// AttackSurfaceSummary captures passive page form, parameter, and storage surface mapping.
+type AttackSurfaceSummary struct {
+	Forms            []FormFinding     `json:"forms,omitempty"`
+	QueryParameters  []QueryParamFinding `json:"queryParameters,omitempty"`
+	ThirdPartyScripts []ScriptOriginFinding `json:"thirdPartyScripts,omitempty"`
+	StorageKeys      []StorageKeyFinding `json:"storageKeys,omitempty"`
+}
+
+type FormFinding struct {
+	Action   string   `json:"action"`
+	Method   string   `json:"method"`
+	Inputs   []InputFinding `json:"inputs,omitempty"`
+	IsLogin  bool     `json:"isLogin"`
+	Context  string   `json:"context,omitempty"`
+}
+
+type InputFinding struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Autocomplete string `json:"autocomplete,omitempty"`
+}
+
+type QueryParamFinding struct {
+	Name   string `json:"name"`
+	Source string `json:"source"` // "url", "form", "js"
+}
+
+type ScriptOriginFinding struct {
+	Origin      string `json:"origin"`
+	IsThirdParty bool  `json:"isThirdParty"`
+	URL         string `json:"url"`
+}
+
+type StorageKeyFinding struct {
+	Type   string `json:"type"` // "localStorage", "sessionStorage"
+	Key    string `json:"key"`
+	Source string `json:"source"` // "js", "html"
 }
 
 // ClientSideClue captures bounded, redacted client-side exposure indicators.
@@ -1421,7 +1821,7 @@ func filterBulkTargets(rawInput, scopeInput, excludeInput string) []string {
 	return urls
 }
 
-func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, customHeaders map[string]string, proxyURL string, scopeInput string, excludeInput string) []BulkHeaderResult {
+func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTargets bool, requestDelayMs int, rps int, jitterMs int, userAgent string, timeoutSeconds int, customHeaders map[string]string, proxyURL string, scopeInput string, excludeInput string, customRules *CustomRulesFile) []BulkHeaderResult {
 	urls := filterBulkTargets(rawInput, scopeInput, excludeInput)
 
 	if len(urls) == 0 {
@@ -1497,7 +1897,7 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 				results[i] = BulkHeaderResult{URL: inputURL, FinalURL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
 				return
 			}
-			results[i] = analyzeURL(target, client, secHeaders, profile)
+			results[i] = analyzeURL(target, client, secHeaders, profile, customRules)
 			client.CloseIdleConnections()
 		}(idx, rawURL)
 	}
@@ -1510,18 +1910,18 @@ func (a *App) AnalyzeBulkURLs(rawInput string, concurrency int, allowPrivateTarg
 		}
 		targetKey = redactHistoryTarget(targetKey)
 		if targetKey != "" {
-			if err := a.saveHistory("http", targetKey, res); err != nil {
+			if err := a.saveHistory("http", targetKey, res, 0); err != nil {
 				log.Printf("Codexa Scanner: saving HTTP target history: %v", err)
 			}
 		}
 	}
-	if err := a.saveHistory("http-bulk", fmt.Sprintf("bulk HTTP (%d targets)", len(urls)), results); err != nil {
+	if err := a.saveHistory("http-bulk", fmt.Sprintf("bulk HTTP (%d targets)", len(urls)), results, 0); err != nil {
 		log.Printf("Codexa Scanner: saving HTTP scan history: %v", err)
 	}
 	return results
 }
 
-func analyzeURL(target string, client *http.Client, secHeaders []string, profile HTTPRequestProfile) BulkHeaderResult {
+func analyzeURL(target string, client *http.Client, secHeaders []string, profile HTTPRequestProfile, customRules *CustomRulesFile) BulkHeaderResult {
 	inputURL, parsed, _, err := parseHTTPAnalysisURL(target)
 	if err != nil {
 		return BulkHeaderResult{URL: inputURL, Assessment: webAuditAssessmentLabel, Redirects: []RedirectHop{}, Error: err.Error()}
@@ -1561,6 +1961,9 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 		inspectBase.Fragment = ""
 		result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "", ua)
 		result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.", ua)
+		result.GraphQL = inspectWebResource(client, &inspectBase, "/graphql", 4096, "GraphQL introspection endpoint; check if schema introspection is enabled.", ua)
+		result.Swagger = inspectWebResource(client, &inspectBase, "/swagger.json", 8192, "Swagger/OpenAPI 2.0 spec endpoint; unauthenticated exposure may leak API structure.", ua)
+		result.OpenAPI = inspectWebResource(client, &inspectBase, "/openapi.json", 8192, "OpenAPI 3.x spec endpoint; unauthenticated exposure may leak API structure.", ua)
 		result.RiskScore, result.Grade = gradeFindings(result.Findings)
 		return result
 	}
@@ -1581,7 +1984,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 			result.Present[h] = value
 		}
 	}
-	result.Findings = auditHTTPResponse(resp, bodyBytes)
+	result.Findings = auditHTTPResponse(resp, bodyBytes, customRules)
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		cert := resp.TLS.PeerCertificates[0]
 		days := int(time.Until(cert.NotAfter).Hours() / 24)
@@ -1625,13 +2028,211 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 	inspectBase.Fragment = ""
 	result.SecurityTxt = inspectWebResource(client, &inspectBase, "/.well-known/security.txt", 8192, "", ua)
 	result.RobotsTxt = inspectWebResource(client, &inspectBase, "/robots.txt", 8192, "robots.txt is discovery guidance, not a security control.", ua)
+	result.GraphQL = inspectWebResource(client, &inspectBase, "/graphql", 4096, "GraphQL introspection endpoint; check if schema introspection is enabled.", ua)
+	result.Swagger = inspectWebResource(client, &inspectBase, "/swagger.json", 8192, "Swagger/OpenAPI 2.0 spec endpoint; unauthenticated exposure may leak API structure.", ua)
+	result.OpenAPI = inspectWebResource(client, &inspectBase, "/openapi.json", 8192, "OpenAPI 3.x spec endpoint; unauthenticated exposure may leak API structure.", ua)
 
-	clientSide, csFindings := auditClientSideExposure(client, resp.Request.URL, bodyBytes, result.Findings, ua)
+	// Generate findings for exposed API documentation endpoints
+	if result.GraphQL != nil && result.GraphQL.Found {
+		body := strings.ToLower(result.GraphQL.Body)
+		if strings.Contains(body, "__schema") || strings.Contains(body, "introspection") || result.GraphQL.StatusCode == 200 {
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "graphql-introspection-enabled",
+				Severity:       "medium",
+				Title:          "GraphQL introspection endpoint accessible",
+				Description:    "The /graphql endpoint responded and may allow schema introspection. This can expose the full API schema to unauthenticated users.",
+				Recommendation: "Disable introspection in production or restrict access to authenticated/authorized users only.",
+				Evidence:       "GET " + result.GraphQL.URL + " returned " + strconv.Itoa(result.GraphQL.StatusCode),
+			})
+		}
+	}
+	if result.Swagger != nil && result.Swagger.Found && result.Swagger.StatusCode == 200 {
+		result.Findings = append(result.Findings, SecurityFinding{
+			ID:             "swagger-spec-exposed",
+			Severity:       "low",
+			Title:          "Swagger/OpenAPI 2.0 specification publicly accessible",
+			Description:    "The /swagger.json endpoint returned a 200 OK response, potentially exposing the full API specification without authentication.",
+			Recommendation: "Restrict access to API documentation endpoints to authorized users or internal networks only.",
+			Evidence:       "GET " + result.Swagger.URL + " returned 200 OK",
+		})
+	}
+	if result.OpenAPI != nil && result.OpenAPI.Found && result.OpenAPI.StatusCode == 200 {
+		result.Findings = append(result.Findings, SecurityFinding{
+			ID:             "openapi-spec-exposed",
+			Severity:       "low",
+			Title:          "OpenAPI 3.x specification publicly accessible",
+			Description:    "The /openapi.json endpoint returned a 200 OK response, potentially exposing the full API specification without authentication.",
+			Recommendation: "Restrict access to API documentation endpoints to authorized users or internal networks only.",
+			Evidence:       "GET " + result.OpenAPI.URL + " returned 200 OK",
+		})
+	}
+
+	clientSide, csFindings := auditClientSideExposure(client, resp.Request.URL, bodyBytes, result.Findings, ua, customRules)
 	if clientSide != nil {
 		result.ClientSideAudit = clientSide
 	}
 	if len(csFindings) > 0 {
 		result.Findings = append(result.Findings, csFindings...)
+	}
+
+	// Cloud storage bucket exposure audit
+	cloudFindings := auditCloudStorageExposure(client, bodyBytes, resp.Request.URL, ua)
+	if len(cloudFindings) > 0 {
+		result.CloudStorage = cloudFindings
+		for _, cf := range cloudFindings {
+			severity := "info"
+			titleSuffix := ""
+			descSuffix := ""
+			if cf.Listable {
+				severity = "high"
+				titleSuffix = " (publicly listable)"
+				descSuffix = "The bucket allows public listing of objects."
+			} else if cf.StatusCode == 200 {
+				severity = "medium"
+				titleSuffix = " (accessible)"
+				descSuffix = "The bucket was accessible but listing was not confirmed."
+			} else {
+				descSuffix = "The bucket was referenced but not accessible."
+			}
+			evidence := "URL: " + cf.URL
+			if cf.Evidence != "" {
+				evidence += "; " + cf.Evidence
+			}
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "cloud-storage-" + strings.ToLower(strings.ReplaceAll(cf.Provider, " ", "-")) + "-" + sanitizeIDFragment(cf.Bucket),
+				Severity:       severity,
+				Title:          cf.Provider + " bucket referenced" + titleSuffix,
+				Description:    "A reference to " + cf.Provider + " bucket " + cf.Bucket + " was found in the response. " + descSuffix,
+				Recommendation: cf.Remediation,
+				Evidence:       evidence,
+			})
+		}
+	}
+
+	// Rate-limiting and cache-control header audit
+	rateLimitAudit := auditRateLimitAndCacheControl(resp)
+	if rateLimitAudit != nil {
+		result.RateLimitAudit = rateLimitAudit
+		if rateLimitAudit.IsSensitiveEndpoint {
+			if !rateLimitAudit.HasRateLimitHeaders {
+				result.Findings = append(result.Findings, SecurityFinding{
+					ID:             "rate-limit-headers-missing",
+					Severity:       "medium",
+					Title:          "Rate-limit headers missing on sensitive endpoint",
+					Description:    "The sensitive endpoint did not return standard rate-limiting headers (X-RateLimit-*, RateLimit-*, Retry-After). This makes it harder for clients to respect rate limits and increases abuse risk.",
+					Recommendation: "Implement rate limiting and return appropriate headers (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After) on sensitive endpoints.",
+					Evidence:       "Path: " + resp.Request.URL.Path + "; Headers checked: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, X-Rate-Limit-Limit, X-Rate-Limit-Remaining, X-Rate-Limit-Reset, Retry-After",
+				})
+			}
+			if rateLimitAudit.MissingNoStore {
+				result.Findings = append(result.Findings, SecurityFinding{
+					ID:             "cache-control-no-store-missing",
+					Severity:       "medium",
+					Title:          "Cache-Control: no-store missing on sensitive response",
+					Description:    "The sensitive response does not include Cache-Control: no-store, which may allow browsers or proxies to cache sensitive data.",
+					Recommendation: "Add Cache-Control: no-store, no-cache, must-revalidate to sensitive responses to prevent caching.",
+					Evidence:       "Path: " + resp.Request.URL.Path + "; Cache-Control: " + resp.Header.Get("Cache-Control"),
+				})
+			}
+		}
+	}
+
+	// Webhook and OAuth posture audit
+	scriptURLs := extractFirstPartyScriptURLs(resp.Request.URL, bodyBytes, maxClientScripts)
+	webhookOAuth := auditWebhookAndOAuth(client, bodyBytes, resp.Request.URL, ua, scriptURLs)
+	if webhookOAuth != nil && (len(webhookOAuth.Webhooks) > 0 || len(webhookOAuth.OAuth) > 0) {
+		result.WebhookOAuth = webhookOAuth
+		for _, wf := range webhookOAuth.Webhooks {
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "webhook-exposed-" + strings.ToLower(wf.Platform),
+				Severity:       "high",
+				Title:          wf.Platform + " webhook URL exposed in client-side code",
+				Description:    "An exposed " + wf.Platform + " webhook URL was found in client-side JavaScript. This may allow unauthorized message sending or data exfiltration.",
+				Recommendation: "Move webhook URLs to server-side code. Use server-side proxies with proper authentication and rate limiting.",
+				Evidence:       "Redacted URL: " + wf.Redacted,
+			})
+		}
+		for _, of := range webhookOAuth.OAuth {
+			severity := "info"
+			if of.Parameter == "client_secret" {
+				severity = "high"
+			} else if of.Parameter == "redirect_uri" {
+				severity = "medium"
+			}
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "oauth-param-" + of.Parameter,
+				Severity:       severity,
+				Title:          "OAuth " + of.Parameter + " exposed in client-side code",
+				Description:    "An OAuth " + of.Parameter + " parameter was found in client-side JavaScript. " + of.Note,
+				Recommendation: "Review OAuth parameter exposure. Public client_id is expected for SPAs, but client_secret and redirect_uri should not be in client-side code. Use PKCE for public clients.",
+				Evidence:       "Parameter: " + of.Parameter + ", Redacted value: " + of.Redacted + ", Context: " + of.Context,
+			})
+		}
+	}
+
+	// Attack surface mapping (forms, params, scripts, storage)
+	attackSurface := auditAttackSurface(client, bodyBytes, resp.Request.URL, ua, scriptURLs)
+	if attackSurface != nil && (len(attackSurface.Forms) > 0 || len(attackSurface.QueryParameters) > 0 || len(attackSurface.ThirdPartyScripts) > 0 || len(attackSurface.StorageKeys) > 0) {
+		result.AttackSurface = attackSurface
+		// Generate findings for notable attack surface elements
+		for _, form := range attackSurface.Forms {
+			severity := "info"
+			if form.IsLogin {
+				severity = "medium"
+			}
+			loginSuffix := ""
+			if form.IsLogin {
+				loginSuffix = " (likely login)"
+			}
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "attack-surface-form-" + sanitizeIDFragment(form.Action),
+				Severity:       severity,
+				Title:          "HTML form discovered" + loginSuffix,
+				Description:    "An HTML form was found with action=" + form.Action + " and method=" + form.Method + ". It contains " + strconv.Itoa(len(form.Inputs)) + " input field(s).",
+				Recommendation: "Review form inputs for sensitive data handling. Ensure CSRF protection, input validation, and appropriate autocomplete settings. Login forms should use HTTPS and have proper rate limiting.",
+				Evidence:       "Action: " + form.Action + ", Method: " + form.Method + ", Inputs: " + strconv.Itoa(len(form.Inputs)),
+			})
+		}
+		if len(attackSurface.QueryParameters) > 0 {
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "attack-surface-query-params",
+				Severity:       "info",
+				Title:          "Query parameters discovered",
+				Description:    strconv.Itoa(len(attackSurface.QueryParameters)) + " unique query parameter(s) found in URL and form actions. These are potential input vectors for testing.",
+				Recommendation: "Review each parameter for input validation, encoding, and authorization checks.",
+				Evidence:       "Parameters: " + joinParamNames(attackSurface.QueryParameters),
+			})
+		}
+		if len(attackSurface.ThirdPartyScripts) > 0 {
+			thirdPartyCount := 0
+			for _, s := range attackSurface.ThirdPartyScripts {
+				if s.IsThirdParty {
+					thirdPartyCount++
+				}
+			}
+			tpSuffix := ""
+			if thirdPartyCount > 0 {
+				tpSuffix = " (" + strconv.Itoa(thirdPartyCount) + " third-party)"
+			}
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "attack-surface-third-party-scripts",
+				Severity:       "info",
+				Title:          "Third-party scripts loaded" + tpSuffix,
+				Description:    strconv.Itoa(len(attackSurface.ThirdPartyScripts)) + " script origin(s) found. Third-party scripts can introduce supply chain risks.",
+				Recommendation: "Review third-party script origins for trustworthiness. Consider using Subresource Integrity (SRI) and Content Security Policy to mitigate risks.",
+				Evidence:       "Script origins: " + joinScriptOrigins(attackSurface.ThirdPartyScripts),
+			})
+		}
+		if len(attackSurface.StorageKeys) > 0 {
+			result.Findings = append(result.Findings, SecurityFinding{
+				ID:             "attack-surface-storage-keys",
+				Severity:       "info",
+				Title:          "Client-side storage keys discovered",
+				Description:    strconv.Itoa(len(attackSurface.StorageKeys)) + " localStorage/sessionStorage key(s) referenced in JavaScript. These may store sensitive data.",
+				Recommendation: "Review stored data for sensitivity. Avoid storing tokens, PII, or secrets in client-side storage. Use secure, HttpOnly cookies for sensitive session data.",
+				Evidence:       "Keys: " + joinStorageKeys(attackSurface.StorageKeys),
+			})
+		}
 	}
 
 	// Collect advisory matches
@@ -1647,7 +2248,7 @@ func analyzeURL(target string, client *http.Client, secHeaders []string, profile
 	return result
 }
 
-func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte, existing []SecurityFinding, ua string) (*ClientSideAudit, []SecurityFinding) {
+func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte, existing []SecurityFinding, ua string, customRules *CustomRulesFile) (*ClientSideAudit, []SecurityFinding) {
 	if client == nil || pageURL == nil || len(body) == 0 {
 		return nil, nil
 	}
@@ -1686,7 +2287,7 @@ func auditClientSideExposure(client *http.Client, pageURL *url.URL, body []byte,
 		}
 		audit.ScriptsScanned++
 
-		for _, clue := range scanScriptSecrets(scriptURL, content) {
+		for _, clue := range scanScriptSecrets(scriptURL, content, customRules) {
 			key := clue.Kind + "|" + clue.ScriptURL + "|" + clue.Value
 			if seenSecrets[key] {
 				continue
@@ -1881,7 +2482,7 @@ func redactSecretPreview(s string) string {
 	return s[:4] + "****" + s[len(s)-4:]
 }
 
-func scanScriptSecrets(scriptURL, content string) []ClientSideClue {
+func scanScriptSecrets(scriptURL, content string, customRules *CustomRulesFile) []ClientSideClue {
 	patterns := []struct {
 		kind string
 		re   *regexp.Regexp
@@ -1892,6 +2493,19 @@ func scanScriptSecrets(scriptURL, content string) []ClientSideClue {
 		{"aws-access-key-id", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
 		{"github-token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`)},
 		{"supabase-service-role-clue", regexp.MustCompile(`(?i)service_role.{0,20}eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
+	}
+	if customRules != nil {
+		for _, sp := range customRules.SecretPatterns {
+			if sp.Pattern != "" {
+				re, err := regexp.Compile(sp.Pattern)
+				if err == nil {
+					patterns = append(patterns, struct {
+						kind string
+						re   *regexp.Regexp
+					}{kind: sp.ID, re: re})
+				}
+			}
+		}
 	}
 	seen := map[string]bool{}
 	clues := make([]ClientSideClue, 0, 4)
@@ -2094,6 +2708,493 @@ func inspectWebResource(client *http.Client, base *url.URL, path string, maxByte
 	return inspector
 }
 
+func auditCloudStorageExposure(client *http.Client, body []byte, baseURL *url.URL, ua string) []CloudStorageFinding {
+	if client == nil || baseURL == nil || len(body) == 0 {
+		return nil
+	}
+	var findings []CloudStorageFinding
+
+	// Cloud storage URL patterns
+	patterns := []struct {
+		regex     *regexp.Regexp
+		provider  string
+		bucketExt func(string) string
+	}{
+		{regexp.MustCompile(`https?://([a-z0-9.-]+)\.s3\.amazonaws\.com`), "AWS S3", func(s string) string { return extractBetween(s, "https://", ".s3.amazonaws.com") }},
+		{regexp.MustCompile(`https?://s3\.amazonaws\.com/([a-z0-9.-]+)`), "AWS S3", func(s string) string { return extractBetween(s, "s3.amazonaws.com/", "/") }},
+		{regexp.MustCompile(`https?://([a-z0-9.-]+)\.storage\.googleapis\.com`), "Google Cloud Storage", func(s string) string { return extractBetween(s, "https://", ".storage.googleapis.com") }},
+		{regexp.MustCompile(`https?://storage\.googleapis\.com/([a-z0-9.-]+)`), "Google Cloud Storage", func(s string) string { return extractBetween(s, "storage.googleapis.com/", "/") }},
+		{regexp.MustCompile(`https?://([a-z0-9.-]+)\.blob\.core\.windows\.net`), "Azure Blob Storage", func(s string) string { return extractBetween(s, "https://", ".blob.core.windows.net") }},
+	}
+
+	seen := make(map[string]bool)
+	bodyStr := string(body)
+
+	for _, p := range patterns {
+		matches := p.regex.FindAllString(bodyStr, -1)
+		for _, match := range matches {
+			key := p.provider + "|" + match
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			bucket := p.bucketExt(match)
+			finding := CloudStorageFinding{
+				URL:      match,
+				Provider: p.provider,
+				Bucket:   bucket,
+			}
+
+			// Check if bucket is publicly listable with a bounded HEAD request
+			checkClient := &http.Client{
+				Timeout: client.Timeout,
+				Transport: client.Transport,
+			}
+			req, err := http.NewRequest(http.MethodHead, match, nil)
+			if err == nil {
+				req.Header.Set("User-Agent", ua)
+				resp, err := checkClient.Do(req)
+				if err == nil {
+					finding.StatusCode = resp.StatusCode
+					resp.Body.Close()
+					if resp.StatusCode == 200 {
+						// Try a GET to see if it returns ListBucketResult XML
+						reqGet, _ := http.NewRequest(http.MethodGet, match+"?list-type=2", nil)
+						reqGet.Header.Set("User-Agent", ua)
+						respGet, err := checkClient.Do(reqGet)
+						if err == nil {
+							bodyBytes, _ := io.ReadAll(io.LimitReader(respGet.Body, 16*1024))
+							respGet.Body.Close()
+							bodyStr := string(bodyBytes)
+							if strings.Contains(bodyStr, "<ListBucketResult") || strings.Contains(bodyStr, "Contents>") {
+								finding.Listable = true
+								finding.Evidence = "Returned ListBucketResult XML"
+							} else if respGet.StatusCode == 200 && (strings.Contains(strings.ToLower(bodyStr), "index") || strings.Contains(strings.ToLower(bodyStr), "contents")) {
+								finding.Listable = true
+								finding.Evidence = "Publicly accessible bucket listing"
+							}
+						}
+					}
+				}
+			}
+
+			if finding.Listable {
+				finding.Remediation = "Restrict bucket ACL/policy to remove public list permissions. Use bucket policies or IAM to limit access to authorized principals only."
+			} else if finding.StatusCode == 200 {
+				finding.Remediation = "Bucket returned 200 OK but listing not confirmed. Verify bucket permissions and consider restricting public access."
+			} else {
+				finding.Remediation = "Bucket not publicly listable. Monitor for configuration changes."
+			}
+
+			findings = append(findings, finding)
+		}
+	}
+
+	return findings
+}
+
+func extractBetween(s, start, end string) string {
+	startIdx := strings.Index(s, start)
+	if startIdx == -1 {
+		return ""
+	}
+	startIdx += len(start)
+	endIdx := strings.Index(s[startIdx:], end)
+	if endIdx == -1 {
+		return s[startIdx:]
+	}
+	return s[startIdx : startIdx+endIdx]
+}
+
+func auditRateLimitAndCacheControl(resp *http.Response) *RateLimitAuditResult {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+	result := &RateLimitAuditResult{}
+
+	// Check for rate limit headers
+	rateLimitHeaders := []string{
+		"X-RateLimit-Limit",
+		"X-RateLimit-Remaining",
+		"X-RateLimit-Reset",
+		"RateLimit-Limit",
+		"RateLimit-Remaining",
+		"RateLimit-Reset",
+		"X-Rate-Limit-Limit",
+		"X-Rate-Limit-Remaining",
+		"X-Rate-Limit-Reset",
+	}
+	var foundRateLimit []string
+	for _, h := range rateLimitHeaders {
+		if v := resp.Header.Get(h); v != "" {
+			foundRateLimit = append(foundRateLimit, h+": "+v)
+		}
+	}
+	if len(foundRateLimit) > 0 {
+		result.HasRateLimitHeaders = true
+		result.RateLimitHeaders = strings.Join(foundRateLimit, "; ")
+	}
+
+	// Check for Retry-After header
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		result.HasRetryAfter = true
+		result.RetryAfter = v
+	}
+
+	// Check Cache-Control
+	cc := resp.Header.Get("Cache-Control")
+	result.CacheControl = cc
+	result.MissingNoStore = cc == "" || !strings.Contains(strings.ToLower(cc), "no-store")
+
+	// Heuristic: sensitive endpoint if path contains auth, login, api, password, token, session
+	path := resp.Request.URL.Path
+	sensitivePaths := []string{"/login", "/auth", "/api/", "/password", "/token", "/session", "/credential", "/secret", "/key", "/admin"}
+	result.IsSensitiveEndpoint = false
+	for _, sp := range sensitivePaths {
+		if strings.Contains(strings.ToLower(path), sp) {
+			result.IsSensitiveEndpoint = true
+			break
+		}
+	}
+
+	// Note
+	if result.IsSensitiveEndpoint {
+		if !result.HasRateLimitHeaders {
+			result.Note = "Sensitive endpoint missing rate-limit headers (X-RateLimit-*, RateLimit-*, Retry-After). Consider implementing rate limiting to prevent abuse."
+		}
+		if result.MissingNoStore {
+			result.Note += " Missing Cache-Control: no-store on sensitive response. Sensitive data should not be cached."
+		}
+	}
+
+	return result
+}
+
+func auditWebhookAndOAuth(client *http.Client, body []byte, baseURL *url.URL, ua string, scriptURLs []string) *WebhookOAuthAudit {
+	if len(body) == 0 && len(scriptURLs) == 0 {
+		return nil
+	}
+	result := &WebhookOAuthAudit{}
+
+	// Webhook URL patterns
+	webhookPatterns := []struct {
+		platform string
+		regex    *regexp.Regexp
+	}{
+		{"Slack", regexp.MustCompile(`https://hooks\.slack\.com/services/[A-Z0-9/]+`)},
+		{"Slack", regexp.MustCompile(`https://hooks\.slack\.com/workflows/[A-Z0-9/]+`)},
+		{"Discord", regexp.MustCompile(`https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+`)},
+		{"Telegram", regexp.MustCompile(`https://api\.telegram\.org/bot[0-9]+:[A-Za-z0-9_-]+/sendMessage`)},
+		{"Microsoft Teams", regexp.MustCompile(`https://[a-z0-9-]+\.webhook\.office\.com/webhookb2/[a-zA-Z0-9/]+`)},
+		{"Generic Webhook", regexp.MustCompile(`https?://[a-z0-9.-]+/(webhook|webhooks?|callback)[^"'\s<>]*`)},
+	}
+
+	// OAuth parameter patterns
+	oauthPatterns := []struct {
+		param  string
+		regex  *regexp.Regexp
+	}{
+		{"client_id", regexp.MustCompile(`client_id["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?`)},
+		{"redirect_uri", regexp.MustCompile(`redirect_uri["']?\s*[:=]\s*["']?([^"'\s&]+)["']?`)},
+		{"client_secret", regexp.MustCompile(`client_secret["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?`)},
+		{"scope", regexp.MustCompile(`scope["']?\s*[:=]\s*["']?([^"'\s]+)["']?`)},
+		{"state", regexp.MustCompile(`state["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?`)},
+		{"response_type", regexp.MustCompile(`response_type["']?\s*[:=]\s*["']?([^"'\s]+)["']?`)},
+		{"grant_type", regexp.MustCompile(`grant_type["']?\s*[:=]\s*["']?([^"'\s]+)["']?`)},
+	}
+
+	seenWebhooks := make(map[string]bool)
+	seenOAuth := make(map[string]bool)
+
+	// Scan response body
+	allContent := string(body)
+	for _, scriptURL := range scriptURLs {
+		content, ok := fetchBoundedTextResource(client, scriptURL, 512*1024, ua)
+		if ok {
+			allContent += "\n" + content
+		}
+	}
+
+	// Find webhooks
+	for _, wp := range webhookPatterns {
+		matches := wp.regex.FindAllString(allContent, -1)
+		for _, match := range matches {
+			key := wp.platform + "|" + match
+			if seenWebhooks[key] {
+				continue
+			}
+			seenWebhooks[key] = true
+
+			redacted := redactWebhookURL(match)
+			result.Webhooks = append(result.Webhooks, WebhookFinding{
+				Platform: wp.platform,
+				URL:      match,
+				Redacted: redacted,
+				Note:     "Exposed " + wp.platform + " webhook URL found in client-side code. This may allow unauthorized message sending or data exfiltration.",
+			})
+		}
+	}
+
+	// Find OAuth parameters
+	for _, op := range oauthPatterns {
+		matches := op.regex.FindAllStringSubmatch(allContent, -1)
+		for _, match := range matches {
+			if len(match) >= 2 {
+				value := match[1]
+				key := op.param + "|" + value
+				if seenOAuth[key] {
+					continue
+				}
+				seenOAuth[key] = true
+
+				redacted := redactValue(value)
+				result.OAuth = append(result.OAuth, OAuthFinding{
+					Parameter: op.param,
+					Value:     value,
+					Redacted:  redacted,
+					Context:   "Found in client-side JavaScript bundle",
+					Note:      "OAuth " + op.param + " exposed in client-side code. Review if this is intentional (e.g., public client_id for SPA) or accidental leakage.",
+				})
+			}
+		}
+	}
+
+	return result
+}
+
+func redactWebhookURL(url string) string {
+	// Redact tokens in webhook URLs
+	for _, prefix := range []string{"/services/", "/webhooks/", "/api/webhooks/", "bot", "sendMessage"} {
+		idx := strings.Index(url, prefix)
+		if idx >= 0 {
+			// Keep the prefix and domain, redact the token part
+			keep := url[:idx+len(prefix)]
+			return keep + "[REDACTED]"
+		}
+	}
+	// Generic redaction for tokens after last /
+	lastSlash := strings.LastIndex(url, "/")
+	if lastSlash >= 0 && lastSlash < len(url)-1 {
+		return url[:lastSlash+1] + "[REDACTED]"
+	}
+	return "[REDACTED]"
+}
+
+func redactValue(value string) string {
+	if len(value) <= 8 {
+		return "[REDACTED]"
+	}
+	return value[:4] + strings.Repeat("*", len(value)-8) + value[len(value)-4:]
+}
+
+func auditAttackSurface(client *http.Client, body []byte, baseURL *url.URL, ua string, scriptURLs []string) *AttackSurfaceSummary {
+	if len(body) == 0 && len(scriptURLs) == 0 {
+		return nil
+	}
+	result := &AttackSurfaceSummary{}
+
+	bodyStr := string(body)
+
+	// 1. Extract HTML forms
+	formRegex := regexp.MustCompile(`(?i)<form[^>]*action=["']?([^"'>\s]+)["']?[^>]*method=["']?([^"'>\s]+)["']?[^>]*>(.*?)</form>`)
+	formMatches := formRegex.FindAllStringSubmatch(bodyStr, -1)
+	for _, match := range formMatches {
+		if len(match) >= 4 {
+			action := match[1]
+			method := strings.ToUpper(match[2])
+			formContent := match[3]
+
+			// Extract inputs
+			inputRegex := regexp.MustCompile(`(?i)<input[^>]*name=["']?([^"'>\s]+)["']?[^>]*type=["']?([^"'>\s]+)["']?[^>]*autocomplete=["']?([^"'>\s]+)["']?`)
+			inputMatches := inputRegex.FindAllStringSubmatch(formContent, -1)
+			var inputs []InputFinding
+			isLogin := false
+			for _, in := range inputMatches {
+				if len(in) >= 3 {
+					inputType := strings.ToLower(in[2])
+					inputs = append(inputs, InputFinding{
+						Name:        in[1],
+						Type:        inputType,
+						Autocomplete: in[3],
+					})
+					if inputType == "password" || strings.Contains(strings.ToLower(in[1]), "pass") || strings.Contains(strings.ToLower(in[1]), "user") || strings.Contains(strings.ToLower(in[1]), "email") {
+						isLogin = true
+					}
+				}
+			}
+
+			// Also check for textarea and select
+			textareaRegex := regexp.MustCompile(`(?i)<textarea[^>]*name=["']?([^"'>\s]+)["']?`)
+			textareaMatches := textareaRegex.FindAllStringSubmatch(formContent, -1)
+			for _, tm := range textareaMatches {
+				if len(tm) >= 2 {
+					inputs = append(inputs, InputFinding{Name: tm[1], Type: "textarea"})
+				}
+			}
+
+			result.Forms = append(result.Forms, FormFinding{
+				Action:  action,
+				Method:  method,
+				Inputs:  inputs,
+				IsLogin: isLogin,
+				Context: "HTML form",
+			})
+		}
+	}
+
+	// 2. Extract query parameters from URL
+	if baseURL != nil {
+		q := baseURL.Query()
+		for name := range q {
+			result.QueryParameters = append(result.QueryParameters, QueryParamFinding{
+				Name:   name,
+				Source: "url",
+			})
+		}
+	}
+
+	// 3. Extract query parameters from form actions
+	formActionRegex := regexp.MustCompile(`(?i)action=["']?([^"'>\s]+)["']?`)
+	actionMatches := formActionRegex.FindAllStringSubmatch(bodyStr, -1)
+	for _, match := range actionMatches {
+		if len(match) >= 2 {
+			actionURL := match[1]
+			if parsed, err := url.Parse(actionURL); err == nil {
+				q := parsed.Query()
+				for name := range q {
+					result.QueryParameters = append(result.QueryParameters, QueryParamFinding{
+						Name:   name,
+						Source: "form",
+					})
+				}
+			}
+		}
+	}
+
+	// 4. Extract third-party script origins
+	scriptRegex := regexp.MustCompile(`(?i)<script[^>]*src=["']?([^"'>\s]+)["']?`)
+	scriptMatches := scriptRegex.FindAllStringSubmatch(bodyStr, -1)
+	pageOrigin := baseURL.Scheme + "://" + baseURL.Host
+	for _, match := range scriptMatches {
+		if len(match) >= 2 {
+			scriptURL := match[1]
+			parsed, err := url.Parse(scriptURL)
+			if err == nil {
+				isThirdParty := parsed.Scheme != "" && parsed.Host != "" && (parsed.Scheme+"://"+parsed.Host) != pageOrigin
+				result.ThirdPartyScripts = append(result.ThirdPartyScripts, ScriptOriginFinding{
+					Origin:        parsed.Host,
+					IsThirdParty:  isThirdParty,
+					URL:           scriptURL,
+				})
+			}
+		}
+	}
+
+	// 5. Extract storage keys from JS bundles
+	storagePatterns := []struct {
+		regex *regexp.Regexp
+		stype string
+	}{
+		{regexp.MustCompile(`localStorage\.(?:getItem|setItem|removeItem)\s*\(\s*["']([^"']+)["']`), "localStorage"},
+		{regexp.MustCompile(`sessionStorage\.(?:getItem|setItem|removeItem)\s*\(\s*["']([^"']+)["']`), "sessionStorage"},
+		{regexp.MustCompile(`localStorage\[["']([^"']+)["']\]`), "localStorage"},
+		{regexp.MustCompile(`sessionStorage\[["']([^"']+)["']\]`), "sessionStorage"},
+	}
+
+	allContent := bodyStr
+	for _, scriptURL := range scriptURLs {
+		content, ok := fetchBoundedTextResource(client, scriptURL, 512*1024, ua)
+		if ok {
+			allContent += "\n" + content
+		}
+	}
+
+	for _, sp := range storagePatterns {
+		matches := sp.regex.FindAllStringSubmatch(allContent, -1)
+		for _, match := range matches {
+			if len(match) >= 2 {
+				result.StorageKeys = append(result.StorageKeys, StorageKeyFinding{
+					Type:   sp.stype,
+					Key:    match[1],
+					Source: "js",
+				})
+			}
+		}
+	}
+
+	// Deduplicate
+	seenForms := make(map[string]bool)
+	uniqueForms := []FormFinding{}
+	for _, f := range result.Forms {
+		key := f.Action + "|" + f.Method
+		if !seenForms[key] {
+			seenForms[key] = true
+			uniqueForms = append(uniqueForms, f)
+		}
+	}
+	result.Forms = uniqueForms
+
+	seenParams := make(map[string]bool)
+	uniqueParams := []QueryParamFinding{}
+	for _, p := range result.QueryParameters {
+		key := p.Name + "|" + p.Source
+		if !seenParams[key] {
+			seenParams[key] = true
+			uniqueParams = append(uniqueParams, p)
+		}
+	}
+	result.QueryParameters = uniqueParams
+
+	seenScripts := make(map[string]bool)
+	uniqueScripts := []ScriptOriginFinding{}
+	for _, s := range result.ThirdPartyScripts {
+		key := s.Origin + "|" + s.URL
+		if !seenScripts[key] {
+			seenScripts[key] = true
+			uniqueScripts = append(uniqueScripts, s)
+		}
+	}
+	result.ThirdPartyScripts = uniqueScripts
+
+	seenStorage := make(map[string]bool)
+	uniqueStorage := []StorageKeyFinding{}
+	for _, s := range result.StorageKeys {
+		key := s.Type + "|" + s.Key
+		if !seenStorage[key] {
+			seenStorage[key] = true
+			uniqueStorage = append(uniqueStorage, s)
+		}
+	}
+	result.StorageKeys = uniqueStorage
+
+	return result
+}
+
+func joinParamNames(params []QueryParamFinding) string {
+	var names []string
+	for _, p := range params {
+		names = append(names, p.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func joinScriptOrigins(scripts []ScriptOriginFinding) string {
+	var origins []string
+	for _, s := range scripts {
+		origins = append(origins, s.Origin)
+	}
+	return strings.Join(origins, ", ")
+}
+
+func joinStorageKeys(keys []StorageKeyFinding) string {
+	var keyStrs []string
+	for _, k := range keys {
+		keyStrs = append(keyStrs, k.Type+":"+k.Key)
+	}
+	return strings.Join(keyStrs, ", ")
+}
+
 func tlsVerificationSummary(verified bool, chains [][]*x509.Certificate) string {
 	if verified && len(chains) > 0 {
 		return fmt.Sprintf("Verified by system trust store (%d chain(s) presented)", len(chains))
@@ -2104,7 +3205,7 @@ func tlsVerificationSummary(verified bool, chains [][]*x509.Certificate) string 
 	return "Not verified by system trust store; peer certificate details are from the presented chain only"
 }
 
-func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
+func auditHTTPResponse(resp *http.Response, body []byte, customRules *CustomRulesFile) []SecurityFinding {
 	findings := make([]SecurityFinding, 0, 12)
 	add := func(id, severity, title, description, recommendation, evidence string) {
 		findings = append(findings, SecurityFinding{ID: id, Severity: severity, Title: title, Description: description, Recommendation: recommendation, Evidence: evidence})
@@ -2160,6 +3261,26 @@ func auditHTTPResponse(resp *http.Response, body []byte) []SecurityFinding {
 	findings = append(findings, auditCORSPolicy(resp, resp.Request)...)
 	findings = append(findings, auditDBErrorDisclosure(body)...)
 	findings = append(findings, auditJWTPayloadClues(resp)...)
+
+	// Apply custom header rules
+	if customRules != nil {
+		for _, hr := range customRules.HeaderRules {
+			if hr.Header != "" && hr.Match != "" {
+				headerValue := resp.Header.Get(hr.Header)
+				if headerValue != "" {
+					matched, err := regexp.MatchString(hr.Match, headerValue)
+					if err == nil && matched {
+						severity := hr.Severity
+						if severity == "" {
+							severity = "medium"
+						}
+						add("custom-header-"+sanitizeIDFragment(hr.ID), severity, hr.Name, hr.Description, "Review the header configuration based on the custom rule.", fmt.Sprintf("Header %s matched pattern: %s", hr.Header, headerValue))
+					}
+				}
+			}
+		}
+	}
+
 	return findings
 }
 
@@ -3455,4 +4576,892 @@ func sanitizeForPDF(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// ==========================================
+// 15. TOOL INTEROPERABILITY - NMAP XML & SUBDOMAIN IMPORT
+// ==========================================
+
+// NmapXML structures for parsing nmap -oX output
+type nmapXML struct {
+	Hosts []nmapHost `xml:"host"`
+}
+
+type nmapHost struct {
+	Status  nmapStatus   `xml:"status"`
+	Address []nmapAddress `xml:"address"`
+	Hostnames nmapHostnames `xml:"hostnames"`
+	Ports   nmapPorts    `xml:"ports"`
+}
+
+type nmapStatus struct {
+	State string `xml:"state,attr"`
+}
+
+type nmapAddress struct {
+	Addr     string `xml:"addr,attr"`
+	AddrType string `xml:"addrtype,attr"`
+}
+
+type nmapHostnames struct {
+	Hostname []nmapHostname `xml:"hostname"`
+}
+
+type nmapHostname struct {
+	Name string `xml:"name,attr"`
+	Type string `xml:"type,attr"`
+}
+
+type nmapPorts struct {
+	Port []nmapPort `xml:"port"`
+}
+
+type nmapPort struct {
+	Protocol string     `xml:"protocol,attr"`
+	PortID   int        `xml:"portid,attr"`
+	State    nmapState  `xml:"state"`
+	Service  nmapService `xml:"service"`
+}
+
+type nmapState struct {
+	State string `xml:"state,attr"`
+}
+
+type nmapService struct {
+	Name    string `xml:"name,attr"`
+	Product string `xml:"product,attr"`
+	Version string `xml:"version,attr"`
+	Extrainfo string `xml:"extrainfo,attr"`
+	Method  string `xml:"method,attr"`
+	Conf    string `xml:"conf,attr"`
+}
+
+// NmapImportResult represents the result of importing Nmap XML
+type NmapImportResult struct {
+	HostsProcessed    int      `json:"hostsProcessed"`
+	HostsUp           int      `json:"hostsUp"`
+	PortsFound        int      `json:"portsFound"`
+	WebEndpointsFound int      `json:"webEndpointsFound"`
+	Errors            []string `json:"errors,omitempty"`
+}
+
+// SubdomainImportResult represents the result of importing subdomain list
+type SubdomainImportResult struct {
+	SubdomainsLoaded int      `json:"subdomainsLoaded"`
+	DuplicatesRemoved int     `json:"duplicatesRemoved"`
+	InvalidEntries   int      `json:"invalidEntries"`
+	Errors           []string `json:"errors,omitempty"`
+}
+
+// ImportNmapXML parses nmap -oX XML output and stores port scan results in history.
+// It also returns discovered HTTP/HTTPS endpoints for optional Web Audit.
+func (a *App) ImportNmapXML(xmlData string) NmapImportResult {
+	result := NmapImportResult{}
+	if strings.TrimSpace(xmlData) == "" {
+		result.Errors = append(result.Errors, "empty XML input")
+		return result
+	}
+
+	var nmap nmapXML
+	if err := xml.Unmarshal([]byte(xmlData), &nmap); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to parse Nmap XML: %v", err))
+		return result
+	}
+
+	webEndpoints := make(map[string]bool)
+	seenTargets := make(map[string]bool)
+
+	for _, host := range nmap.Hosts {
+		if host.Status.State != "up" {
+			continue
+		}
+		result.HostsProcessed++
+		result.HostsUp++
+
+		// Get the primary IP address
+		var ip string
+		for _, addr := range host.Address {
+			if addr.AddrType == "ipv4" || addr.AddrType == "ipv6" {
+				ip = addr.Addr
+				break
+			}
+		}
+		if ip == "" {
+			continue
+		}
+
+		// Get hostname if available
+		hostname := ip
+		for _, hn := range host.Hostnames.Hostname {
+			if hn.Type == "PTR" || hn.Type == "user" {
+				hostname = hn.Name
+				break
+			}
+		}
+
+		// Skip if already processed this target
+		targetKey := normalizeTargetKey(ip, hostname)
+		if seenTargets[targetKey] {
+			continue
+		}
+		seenTargets[targetKey] = true
+
+		// Process open ports
+		var findings []PortFinding
+		for _, port := range host.Ports.Port {
+			if port.State.State != "open" {
+				continue
+			}
+			result.PortsFound++
+
+			serviceName := port.Service.Name
+			if serviceName == "" {
+				serviceName = commonPorts[port.PortID]
+				if serviceName == "" {
+					serviceName = "unknown"
+				}
+			}
+
+			// Build banner from service info
+			bannerParts := []string{}
+			if port.Service.Product != "" {
+				bannerParts = append(bannerParts, port.Service.Product)
+			}
+			if port.Service.Version != "" {
+				bannerParts = append(bannerParts, port.Service.Version)
+			}
+			if port.Service.Extrainfo != "" {
+				bannerParts = append(bannerParts, port.Service.Extrainfo)
+			}
+			banner := strings.Join(bannerParts, " ")
+
+			finding := PortFinding{Port: port.PortID, Service: serviceName, Banner: banner}
+			findings = append(findings, finding)
+
+			// Check for HTTP/HTTPS ports
+			if port.PortID == 80 || port.PortID == 443 || port.PortID == 8080 || port.PortID == 8443 {
+				scheme := "http"
+				if port.PortID == 443 || port.PortID == 8443 {
+					scheme = "https"
+				}
+				endpoint := fmt.Sprintf("%s://%s:%d", scheme, ip, port.PortID)
+				webEndpoints[endpoint] = true
+				result.WebEndpointsFound++
+			}
+		}
+
+		// Save to history
+		if len(findings) > 0 {
+			if err := a.saveHistory("port", targetKey, findings, 0); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("failed to save history for %s: %v", targetKey, err))
+			}
+		}
+	}
+
+	return result
+}
+
+// normalizeTargetKey creates a consistent key for a target
+func normalizeTargetKey(ip, hostname string) string {
+	if hostname != "" && hostname != ip {
+		return hostname
+	}
+	return ip
+}
+
+// ImportSubdomains imports a newline-delimited subdomain list from external recon tools.
+// Each line should contain a single subdomain (e.g., from subfinder, amass).
+func (a *App) ImportSubdomains(subdomainData string) SubdomainImportResult {
+	result := SubdomainImportResult{}
+	if strings.TrimSpace(subdomainData) == "" {
+		result.Errors = append(result.Errors, "empty subdomain input")
+		return result
+	}
+
+	seen := make(map[string]bool)
+	lines := strings.Split(subdomainData, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Basic validation - must be a valid hostname
+		if !isValidHostname(line) {
+			result.InvalidEntries++
+			result.Errors = append(result.Errors, fmt.Sprintf("invalid hostname: %s", line))
+			continue
+		}
+
+		// Normalize
+		line = strings.ToLower(strings.TrimSuffix(line, "."))
+
+		if seen[line] {
+			result.DuplicatesRemoved++
+			continue
+		}
+		seen[line] = true
+		result.SubdomainsLoaded++
+	}
+
+	return result
+}
+
+// isValidHostname checks if a string is a valid hostname
+func isValidHostname(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	if strings.ContainsAny(host, " \t\r\n:/\\[]@") {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+		for _, r := range label {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ImportNmapXMLFile imports Nmap XML from a file
+func (a *App) ImportNmapXMLFile(filePath string) (NmapImportResult, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return NmapImportResult{}, fmt.Errorf("failed to read file: %w", err)
+	}
+	// Limit file size to 10MB
+	if len(data) > 10*1024*1024 {
+		return NmapImportResult{}, fmt.Errorf("file too large (max 10MB)")
+	}
+	return a.ImportNmapXML(string(data)), nil
+}
+
+// ImportSubdomainsFile imports subdomains from a file
+func (a *App) ImportSubdomainsFile(filePath string) (SubdomainImportResult, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return SubdomainImportResult{}, fmt.Errorf("failed to read file: %w", err)
+	}
+	// Limit file size to 1MB
+	if len(data) > 1024*1024 {
+		return SubdomainImportResult{}, fmt.Errorf("file too large (max 1MB)")
+	}
+	return a.ImportSubdomains(string(data)), nil
+}
+
+// ==========================================
+// 15.2 RAW HTTP REQUEST/RESPONSE INSPECTOR & BOUNDED REPLAY
+// ==========================================
+
+// HTTPInspectorRequest represents a request to inspect or replay
+type HTTPInspectorRequest struct {
+	URL         string            `json:"url"`
+	Method      string            `json:"method,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Body        string            `json:"body,omitempty"`
+	AllowPrivate bool             `json:"allowPrivate,omitempty"`
+	TimeoutSeconds int            `json:"timeoutSeconds,omitempty"`
+}
+
+// HTTPInspectorResponse represents the response from inspection or replay
+type HTTPInspectorResponse struct {
+	Request  *HTTPInspectorRequestDebug `json:"request,omitempty"`
+	Response *HTTPInspectorResponseDebug `json:"response,omitempty"`
+	Error    string                     `json:"error,omitempty"`
+}
+
+type HTTPInspectorRequestDebug struct {
+	URL     string            `json:"url"`
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body,omitempty"`
+}
+
+type HTTPInspectorResponseDebug struct {
+	StatusCode int               `json:"statusCode"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body,omitempty"`
+	BodyTruncated bool           `json:"bodyTruncated,omitempty"`
+	TLS        *TLSDetails       `json:"tls,omitempty"`
+}
+
+// InspectHTTP inspects a URL and returns raw request/response details without storing in history
+func (a *App) InspectHTTP(req HTTPInspectorRequest) HTTPInspectorResponse {
+	if strings.TrimSpace(req.URL) == "" {
+		return HTTPInspectorResponse{Error: "URL is required"}
+	}
+
+	// Validate URL
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil {
+		return HTTPInspectorResponse{Error: fmt.Sprintf("invalid URL: %v", err)}
+	}
+
+	// Only allow HTTP/HTTPS
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return HTTPInspectorResponse{Error: "only HTTP and HTTPS schemes are allowed"}
+	}
+
+	// Default method
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method == "" {
+		method = "GET"
+	}
+
+	// Validate method - only safe methods allowed
+	allowedMethods := map[string]bool{"GET": true, "HEAD": true, "OPTIONS": true}
+	if !allowedMethods[method] {
+		return HTTPInspectorResponse{Error: fmt.Sprintf("method %s not allowed (only GET, HEAD, OPTIONS)", method)}
+	}
+
+	// Timeout
+	timeout := req.TimeoutSeconds
+	if timeout <= 0 {
+		timeout = 10
+	}
+	if timeout > 60 {
+		timeout = 60
+	}
+
+	// Build request
+	httpReq, err := http.NewRequest(method, req.URL, nil)
+	if err != nil {
+		return HTTPInspectorResponse{Error: fmt.Sprintf("failed to create request: %v", err)}
+	}
+
+	// Add custom headers
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	// Default user agent if not set
+	if httpReq.Header.Get("User-Agent") == "" {
+		httpReq.Header.Set("User-Agent", "Codexa Scanner HTTP Inspector")
+	}
+
+	// Create client with scoped transport
+	profile := resolveHTTPRequestProfile(HTTPRequestProfile{
+		TimeoutSeconds: timeout,
+		CustomHeaders:  nil,
+		ProxyURL:       "",
+	})
+
+	client, err := newScopedHTTPClientWithProfile(req.URL, req.AllowPrivate, net.DefaultResolver, profile)
+	if err != nil {
+		return HTTPInspectorResponse{Error: fmt.Sprintf("failed to create client: %v", err)}
+	}
+
+	// Capture request for debugging
+	reqDebug := HTTPInspectorRequestDebug{
+		URL:     req.URL,
+		Method:  method,
+		Headers: make(map[string]string),
+	}
+	for k, v := range httpReq.Header {
+		reqDebug.Headers[k] = strings.Join(v, ", ")
+	}
+	if req.Body != "" && (method == "POST" || method == "PUT" || method == "PATCH") {
+		reqDebug.Body = req.Body
+	}
+
+	// Send request
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return HTTPInspectorResponse{
+			Request: &reqDebug,
+			Error:   fmt.Sprintf("request failed: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	// Read response body (bounded)
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	bodyTruncated := false
+	if resp.ContentLength > 64*1024 || int64(len(bodyBytes)) >= 64*1024 {
+		bodyTruncated = true
+	}
+
+	// Capture response headers
+	respHeaders := make(map[string]string)
+	for k, v := range resp.Header {
+		respHeaders[k] = strings.Join(v, ", ")
+	}
+
+	// TLS details if HTTPS
+	var tlsDetails *TLSDetails
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		cert := resp.TLS.PeerCertificates[0]
+		days := int(time.Until(cert.NotAfter).Hours() / 24)
+		verified := len(resp.TLS.VerifiedChains) > 0
+		chainSubjects := make([]string, 0, len(resp.TLS.PeerCertificates))
+		for _, peerCert := range resp.TLS.PeerCertificates {
+			if peerCert == nil {
+				continue
+			}
+			name := peerCert.Subject.CommonName
+			if name == "" {
+				name = peerCert.Subject.String()
+			}
+			chainSubjects = append(chainSubjects, name)
+		}
+		tlsDetails = &TLSDetails{
+			Version:             tlsVersionName(resp.TLS.Version),
+			CipherSuite:         tls.CipherSuiteName(resp.TLS.CipherSuite),
+			Subject:             cert.Subject.CommonName,
+			Issuer:              cert.Issuer.CommonName,
+			ExpiresAt:           cert.NotAfter,
+			NotBefore:           cert.NotBefore,
+			DaysRemaining:       days,
+			Verified:            verified,
+			VerificationSummary: tlsVerificationSummary(verified, resp.TLS.VerifiedChains),
+			ChainSubjects:       chainSubjects,
+			SANCount:            len(cert.DNSNames) + len(cert.IPAddresses) + len(cert.EmailAddresses) + len(cert.URIs),
+		}
+	}
+
+	return HTTPInspectorResponse{
+		Request: &reqDebug,
+		Response: &HTTPInspectorResponseDebug{
+			StatusCode:    resp.StatusCode,
+			Headers:       respHeaders,
+			Body:          string(bodyBytes),
+			BodyTruncated: bodyTruncated,
+			TLS:           tlsDetails,
+		},
+	}
+}
+
+// ReplayHTTPRequest replays a previously captured request with optional modifications
+func (a *App) ReplayHTTPRequest(originalReq HTTPInspectorRequest, modifications HTTPInspectorRequest) HTTPInspectorResponse {
+	// Merge modifications into original request
+	mergedReq := originalReq
+	if modifications.Method != "" {
+		mergedReq.Method = modifications.Method
+	}
+	if modifications.URL != "" {
+		mergedReq.URL = modifications.URL
+	}
+	if modifications.Headers != nil {
+		if mergedReq.Headers == nil {
+			mergedReq.Headers = make(map[string]string)
+		}
+		for k, v := range modifications.Headers {
+			mergedReq.Headers[k] = v
+		}
+	}
+	if modifications.Body != "" {
+		mergedReq.Body = modifications.Body
+	}
+	if modifications.AllowPrivate {
+		mergedReq.AllowPrivate = true
+	}
+	if modifications.TimeoutSeconds > 0 {
+		mergedReq.TimeoutSeconds = modifications.TimeoutSeconds
+	}
+
+	// Validate that the modified URL is within the same host/port scope as original
+	originalURL, err := url.Parse(originalReq.URL)
+	if err != nil {
+		return HTTPInspectorResponse{Error: "original URL invalid"}
+	}
+	modifiedURL, err := url.Parse(mergedReq.URL)
+	if err != nil {
+		return HTTPInspectorResponse{Error: "modified URL invalid"}
+	}
+
+	// Check host and port match (scope enforcement)
+	if !strings.EqualFold(originalURL.Hostname(), modifiedURL.Hostname()) {
+		return HTTPInspectorResponse{Error: "replay URL must be within the same host scope"}
+	}
+	originalPort := originalURL.Port()
+	modifiedPort := modifiedURL.Port()
+	if originalPort == "" {
+		if originalURL.Scheme == "https" {
+			originalPort = "443"
+		} else {
+			originalPort = "80"
+		}
+	}
+	if modifiedPort == "" {
+		if modifiedURL.Scheme == "https" {
+			modifiedPort = "443"
+		} else {
+			modifiedPort = "80"
+		}
+	}
+	if originalPort != modifiedPort {
+		return HTTPInspectorResponse{Error: "replay URL must be within the same port scope"}
+	}
+
+	return a.InspectHTTP(mergedReq)
+}
+
+// ==========================================
+// 16. WORKSPACE PERSISTENCE & ANALYST TRIAGE
+// ==========================================
+
+// Workspace represents an engagement workspace for organizing scan data.
+type Workspace struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// FindingTag represents a triage tag for a specific finding in a history entry.
+type FindingTag struct {
+	ID        int64     `json:"id"`
+	HistoryID int64     `json:"historyId"`
+	FindingID string    `json:"findingId"`
+	Tag       string    `json:"tag"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// FindingNote represents an analyst note for a specific finding in a history entry.
+type FindingNote struct {
+	ID        int64     `json:"id"`
+	HistoryID int64     `json:"historyId"`
+	FindingID string    `json:"findingId"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// CreateWorkspace creates a new engagement workspace.
+func (a *App) CreateWorkspace(name, description string) (int64, error) {
+	if a == nil || a.historyDB == nil {
+		return 0, errors.New("database unavailable")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, errors.New("workspace name is required")
+	}
+	description = strings.TrimSpace(description)
+	result, err := a.historyDB.Exec(`INSERT INTO workspaces(name, description, created_at)
+		VALUES (?, ?, ?)`, name, description, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// ListWorkspaces returns all engagement workspaces.
+func (a *App) ListWorkspaces() []Workspace {
+	if a == nil || a.historyDB == nil {
+		return []Workspace{}
+	}
+	rows, err := a.historyDB.Query(`SELECT id, name, description, created_at FROM workspaces ORDER BY created_at DESC`)
+	if err != nil {
+		return []Workspace{}
+	}
+	defer rows.Close()
+	var workspaces []Workspace
+	for rows.Next() {
+		var w Workspace
+		var created string
+		if err := rows.Scan(&w.ID, &w.Name, &w.Description, &created); err != nil {
+			continue
+		}
+		w.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		workspaces = append(workspaces, w)
+	}
+	return workspaces
+}
+
+// DeleteWorkspace deletes a workspace by ID. Sets workspace_id to NULL in scan_history.
+func (a *App) DeleteWorkspace(id int64) error {
+	if a == nil || a.historyDB == nil || id <= 0 {
+		return errors.New("invalid workspace ID")
+	}
+	_, err := a.historyDB.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
+	return err
+}
+
+// GetWorkspaceScans returns scan history entries for a specific workspace.
+func (a *App) GetWorkspaceScans(workspaceID int64, limit int) []HistoryEntry {
+	if a == nil || a.historyDB == nil || workspaceID <= 0 || limit <= 0 {
+		return []HistoryEntry{}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := a.historyDB.Query(`SELECT id, scan_type, target, result_json, created_at FROM scan_history
+		WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, limit)
+	if err != nil {
+		return []HistoryEntry{}
+	}
+	defer rows.Close()
+	var entries []HistoryEntry
+	for rows.Next() {
+		var entry HistoryEntry
+		var raw, created string
+		if err := rows.Scan(&entry.ID, &entry.ScanType, &entry.Target, &raw, &created); err != nil {
+			continue
+		}
+		entry.Result = raw
+		entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// SetFindingTag sets or updates a triage tag for a finding in a history entry.
+// Valid tags: "verified", "false_positive", "needs_review", "accepted_risk"
+func (a *App) SetFindingTag(historyID int64, findingID, tag string) error {
+	if a == nil || a.historyDB == nil || historyID <= 0 || findingID == "" || tag == "" {
+		return errors.New("invalid parameters")
+	}
+	validTags := map[string]bool{"verified": true, "false_positive": true, "needs_review": true, "accepted_risk": true}
+	if !validTags[tag] {
+		return fmt.Errorf("invalid tag: %s (must be one of: verified, false_positive, needs_review, accepted_risk)", tag)
+	}
+	_, err := a.historyDB.Exec(`INSERT INTO finding_tags(history_id, finding_id, tag, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(history_id, finding_id) DO UPDATE SET tag = excluded.tag`, historyID, findingID, tag, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// GetFindingTags returns all triage tags for a history entry.
+func (a *App) GetFindingTags(historyID int64) []FindingTag {
+	if a == nil || a.historyDB == nil || historyID <= 0 {
+		return []FindingTag{}
+	}
+	rows, err := a.historyDB.Query(`SELECT id, history_id, finding_id, tag, created_at FROM finding_tags WHERE history_id = ?`, historyID)
+	if err != nil {
+		return []FindingTag{}
+	}
+	defer rows.Close()
+	var tags []FindingTag
+	for rows.Next() {
+		var t FindingTag
+		var created string
+		if err := rows.Scan(&t.ID, &t.HistoryID, &t.FindingID, &t.Tag, &created); err != nil {
+			continue
+		}
+		t.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		tags = append(tags, t)
+	}
+	return tags
+}
+
+// DeleteFindingTag removes a triage tag for a finding.
+func (a *App) DeleteFindingTag(historyID int64, findingID string) error {
+	if a == nil || a.historyDB == nil || historyID <= 0 || findingID == "" {
+		return errors.New("invalid parameters")
+	}
+	_, err := a.historyDB.Exec(`DELETE FROM finding_tags WHERE history_id = ? AND finding_id = ?`, historyID, findingID)
+	return err
+}
+
+// SetFindingNote sets or updates an analyst note for a finding in a history entry.
+func (a *App) SetFindingNote(historyID int64, findingID, note string) error {
+	if a == nil || a.historyDB == nil || historyID <= 0 || findingID == "" {
+		return errors.New("invalid parameters")
+	}
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return a.DeleteFindingNote(historyID, findingID)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := a.historyDB.Exec(`INSERT INTO finding_notes(history_id, finding_id, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(history_id, finding_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at`, historyID, findingID, note, now, now)
+	return err
+}
+
+// GetFindingNotes returns all analyst notes for a history entry.
+func (a *App) GetFindingNotes(historyID int64) []FindingNote {
+	if a == nil || a.historyDB == nil || historyID <= 0 {
+		return []FindingNote{}
+	}
+	rows, err := a.historyDB.Query(`SELECT id, history_id, finding_id, note, created_at, updated_at FROM finding_notes WHERE history_id = ?`, historyID)
+	if err != nil {
+		return []FindingNote{}
+	}
+	defer rows.Close()
+	var notes []FindingNote
+	for rows.Next() {
+		var n FindingNote
+		var created, updated string
+		if err := rows.Scan(&n.ID, &n.HistoryID, &n.FindingID, &n.Note, &created, &updated); err != nil {
+			continue
+		}
+		n.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		n.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		notes = append(notes, n)
+	}
+	return notes
+}
+
+// DeleteFindingNote removes an analyst note for a finding.
+func (a *App) DeleteFindingNote(historyID int64, findingID string) error {
+	if a == nil || a.historyDB == nil || historyID <= 0 || findingID == "" {
+		return errors.New("invalid parameters")
+	}
+	_, err := a.historyDB.Exec(`DELETE FROM finding_notes WHERE history_id = ? AND finding_id = ?`, historyID, findingID)
+	return err
+}
+
+// UpdateHistoryWorkspace assigns a history entry to a workspace (or removes assignment with 0).
+func (a *App) UpdateHistoryWorkspace(historyID int64, workspaceID int64) error {
+	if a == nil || a.historyDB == nil || historyID <= 0 {
+		return errors.New("invalid parameters")
+	}
+	var wsID any
+	if workspaceID > 0 {
+		wsID = workspaceID
+	}
+	_, err := a.historyDB.Exec(`UPDATE scan_history SET workspace_id = ? WHERE id = ?`, wsID, historyID)
+	return err
+}
+
+// ImportNmapXMLToWorkspace imports Nmap XML and stores results in a specific workspace.
+func (a *App) ImportNmapXMLToWorkspace(xmlData string, workspaceID int64) NmapImportResult {
+	result := NmapImportResult{}
+	if strings.TrimSpace(xmlData) == "" {
+		result.Errors = append(result.Errors, "empty XML input")
+		return result
+	}
+
+	var nmap nmapXML
+	if err := xml.Unmarshal([]byte(xmlData), &nmap); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to parse Nmap XML: %v", err))
+		return result
+	}
+
+	webEndpoints := make(map[string]bool)
+	seenTargets := make(map[string]bool)
+
+	for _, host := range nmap.Hosts {
+		if host.Status.State != "up" {
+			continue
+		}
+		result.HostsProcessed++
+		result.HostsUp++
+
+		var ip string
+		for _, addr := range host.Address {
+			if addr.AddrType == "ipv4" || addr.AddrType == "ipv6" {
+				ip = addr.Addr
+				break
+			}
+		}
+		if ip == "" {
+			continue
+		}
+
+		hostname := ip
+		for _, hn := range host.Hostnames.Hostname {
+			if hn.Type == "PTR" || hn.Type == "user" {
+				hostname = hn.Name
+				break
+			}
+		}
+
+		targetKey := normalizeTargetKey(ip, hostname)
+		if seenTargets[targetKey] {
+			continue
+		}
+		seenTargets[targetKey] = true
+
+		var findings []PortFinding
+		for _, port := range host.Ports.Port {
+			if port.State.State != "open" {
+				continue
+			}
+			result.PortsFound++
+
+			serviceName := port.Service.Name
+			if serviceName == "" {
+				serviceName = commonPorts[port.PortID]
+				if serviceName == "" {
+					serviceName = "unknown"
+				}
+			}
+
+			bannerParts := []string{}
+			if port.Service.Product != "" {
+				bannerParts = append(bannerParts, port.Service.Product)
+			}
+			if port.Service.Version != "" {
+				bannerParts = append(bannerParts, port.Service.Version)
+			}
+			if port.Service.Extrainfo != "" {
+				bannerParts = append(bannerParts, port.Service.Extrainfo)
+			}
+			banner := strings.Join(bannerParts, " ")
+
+			finding := PortFinding{Port: port.PortID, Service: serviceName, Banner: banner}
+			findings = append(findings, finding)
+
+			if port.PortID == 80 || port.PortID == 443 || port.PortID == 8080 || port.PortID == 8443 {
+				scheme := "http"
+				if port.PortID == 443 || port.PortID == 8443 {
+					scheme = "https"
+				}
+				endpoint := fmt.Sprintf("%s://%s:%d", scheme, ip, port.PortID)
+				webEndpoints[endpoint] = true
+				result.WebEndpointsFound++
+			}
+		}
+
+		if len(findings) > 0 {
+			if err := a.saveHistory("port", targetKey, findings, workspaceID); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("failed to save history for %s: %v", targetKey, err))
+			}
+		}
+	}
+
+	return result
+}
+
+// ImportSubdomainsToWorkspace imports subdomains and stores results in a specific workspace.
+func (a *App) ImportSubdomainsToWorkspace(subdomainData string, workspaceID int64) SubdomainImportResult {
+	result := SubdomainImportResult{}
+	if strings.TrimSpace(subdomainData) == "" {
+		result.Errors = append(result.Errors, "empty subdomain input")
+		return result
+	}
+
+	seen := make(map[string]bool)
+	lines := strings.Split(subdomainData, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if !isValidHostname(line) {
+			result.InvalidEntries++
+			result.Errors = append(result.Errors, fmt.Sprintf("invalid hostname: %s", line))
+			continue
+		}
+
+		line = strings.ToLower(strings.TrimSuffix(line, "."))
+
+		if seen[line] {
+			result.DuplicatesRemoved++
+			continue
+		}
+		seen[line] = true
+		result.SubdomainsLoaded++
+
+		// Save each subdomain as a separate subdomain scan result
+		if err := a.saveHistory("subdomain", line, line, workspaceID); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to save history for %s: %v", line, err))
+		}
+	}
+
+	return result
 }

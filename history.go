@@ -84,17 +84,59 @@ func openScanHistory(path string) (*sql.DB, error) {
 	db.SetConnMaxLifetime(0)
 
 	if _, err = db.Exec(`PRAGMA busy_timeout = 5000`); err == nil {
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT,
+			created_at TEXT NOT NULL
+		)`)
+	}
+	if err == nil {
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS scan_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			scan_type TEXT NOT NULL,
 			target TEXT NOT NULL,
 			result_json TEXT NOT NULL,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			workspace_id INTEGER REFERENCES workspaces(id) ON DELETE SET NULL
 		)`)
 	}
 	if err == nil {
 		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_scan_history_type_target_created
 			ON scan_history(scan_type, target, created_at DESC, id DESC)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_scan_history_workspace
+			ON scan_history(workspace_id)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS finding_tags (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			history_id INTEGER NOT NULL REFERENCES scan_history(id) ON DELETE CASCADE,
+			finding_id TEXT NOT NULL,
+			tag TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(history_id, finding_id)
+		)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_finding_tags_history
+			ON finding_tags(history_id)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS finding_notes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			history_id INTEGER NOT NULL REFERENCES scan_history(id) ON DELETE CASCADE,
+			finding_id TEXT NOT NULL,
+			note TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(history_id, finding_id)
+		)`)
+	}
+	if err == nil {
+		_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_finding_notes_history
+			ON finding_notes(history_id)`)
 	}
 	if err == nil {
 		err = db.Ping()
@@ -114,7 +156,7 @@ func openScanHistory(path string) (*sql.DB, error) {
 // is intentionally a no-op so scans remain usable when local history is disabled.
 // Targets and URL-bearing result fields are redacted before persistence to avoid
 // storing embedded credentials or sensitive query values.
-func (a *App) saveHistory(scanType, target string, result any) error {
+func (a *App) saveHistory(scanType, target string, result any, workspaceID int64) error {
 	if a == nil || a.historyDB == nil {
 		return nil
 	}
@@ -124,8 +166,12 @@ func (a *App) saveHistory(scanType, target string, result any) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.historyDB.Exec(`INSERT INTO scan_history(scan_type, target, result_json, created_at)
-		VALUES (?, ?, ?, ?)`, strings.ToLower(strings.TrimSpace(scanType)), redactedTarget, string(encoded), time.Now().UTC().Format(time.RFC3339Nano))
+	var wsID any
+	if workspaceID > 0 {
+		wsID = workspaceID
+	}
+	_, err = a.historyDB.Exec(`INSERT INTO scan_history(scan_type, target, result_json, created_at, workspace_id)
+		VALUES (?, ?, ?, ?, ?)`, strings.ToLower(strings.TrimSpace(scanType)), redactedTarget, string(encoded), time.Now().UTC().Format(time.RFC3339Nano), wsID)
 	if err != nil {
 		return err
 	}

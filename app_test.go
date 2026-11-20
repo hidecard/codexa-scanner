@@ -28,7 +28,7 @@ func TestAuditHTTPResponseFindsPassiveIssues(t *testing.T) {
 		},
 		Request: &http.Request{URL: target},
 	}
-	findings := auditHTTPResponse(resp, []byte(`<html><img src="http://cdn.example/img.png"></html>`))
+	findings := auditHTTPResponse(resp, []byte(`<html><img src="http://cdn.example/img.png"></html>`), nil)
 	seen := map[string]bool{}
 	for _, finding := range findings {
 		seen[finding.ID] = true
@@ -71,7 +71,7 @@ func TestAuditHTTPResponseAcceptsConfiguredHeadersAndCookies(t *testing.T) {
 		},
 		Request: &http.Request{URL: target},
 	}
-	findings := auditHTTPResponse(resp, []byte("<html></html>"))
+	findings := auditHTTPResponse(resp, []byte("<html></html>"), nil)
 	if len(findings) != 0 {
 		t.Fatalf("expected no findings for configured response, got: %+v", findings)
 	}
@@ -93,7 +93,7 @@ func TestAuditHTTPResponseReportsCSPDiagnosticsWithEvidence(t *testing.T) {
 		},
 		Request: &http.Request{URL: target},
 	}
-	findings := auditHTTPResponse(resp, []byte("<html></html>"))
+	findings := auditHTTPResponse(resp, []byte("<html></html>"), nil)
 	byID := map[string]SecurityFinding{}
 	for _, finding := range findings {
 		byID[finding.ID] = finding
@@ -137,7 +137,7 @@ func TestAuditHTTPResponseDetectsCORSMisconfigAndDBError(t *testing.T) {
 		Request: &http.Request{URL: target},
 	}
 	body := []byte("<html><body>SQLSTATE[42000]: Syntax error or access violation</body></html>")
-	findings := auditHTTPResponse(resp, body)
+	findings := auditHTTPResponse(resp, body, nil)
 	byID := map[string]SecurityFinding{}
 	for _, f := range findings {
 		byID[f.ID] = f
@@ -165,7 +165,7 @@ func TestAuditHTTPResponseDetectsJWTAlgNone(t *testing.T) {
 		},
 		Request: &http.Request{URL: target},
 	}
-	findings := auditHTTPResponse(resp, []byte("<html></html>"))
+	findings := auditHTTPResponse(resp, []byte("<html></html>"), nil)
 	found := false
 	for _, f := range findings {
 		if f.ID == "jwt-alg-none" {
@@ -214,7 +214,7 @@ func TestAnalyzeURLRejectsUntrustedTLSCertificate(t *testing.T) {
 	defer server.Close()
 
 	client := &http.Client{Timeout: time.Second}
-	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{}, nil)
 	if result.Error == "" {
 		t.Fatal("expected self-signed test certificate to fail normal TLS verification")
 	}
@@ -240,7 +240,7 @@ func TestAnalyzeURLReportsPlainHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := analyzeURL(server.URL, &http.Client{Timeout: time.Second}, nil, HTTPRequestProfile{})
+	result := analyzeURL(server.URL, &http.Client{Timeout: time.Second}, nil, HTTPRequestProfile{}, nil)
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}
@@ -412,7 +412,7 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10, nil, "", "", "")
+	results := (&App{}).AnalyzeBulkURLs(server.URL, 1, false, 0, 0, 0, "", 10, nil, "", "", "", nil)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "private or loopback") {
 		t.Fatalf("expected private target policy error, got %+v", results)
 	}
@@ -420,12 +420,12 @@ func TestAnalyzeBulkURLsRequiresPrivateTargetOptIn(t *testing.T) {
 		t.Fatalf("request reached private target without opt-in (%d requests)", got)
 	}
 
-	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10, nil, "", "", "")
+	results = (&App{}).AnalyzeBulkURLs(server.URL, 1, true, 0, 0, 0, "", 10, nil, "", "", "", nil)
 	if len(results) != 1 || results[0].Error != "" || results[0].StatusCode != http.StatusOK {
 		t.Fatalf("explicit opt-in should permit authorized loopback target, got %+v", results)
 	}
-	if got := atomic.LoadInt32(&requests); got != 3 {
-		t.Fatalf("expected main request plus security.txt/robots.txt inspector requests after opt-in, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 6 {
+		t.Fatalf("expected main request plus security.txt/robots.txt/graphql/swagger/openapi inspector requests after opt-in, got %d", got)
 	}
 }
 
@@ -442,7 +442,7 @@ func TestAnalyzeBulkURLsBlocksCrossHostRedirectBeforeDestinationRequest(t *testi
 	}))
 	defer server.Close()
 
-	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10, nil, "", "", "")
+	results := (&App{}).AnalyzeBulkURLs(server.URL+"/start", 1, true, 0, 0, 0, "", 10, nil, "", "", "", nil)
 	if len(results) != 1 || !strings.Contains(results[0].Error, "outside this URL's hostname") {
 		t.Fatalf("expected out-of-scope redirect error, got %+v", results)
 	}
@@ -486,7 +486,7 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 		}
 	}
 
-	result := analyzeURL(serverURL.String(), client, nil, HTTPRequestProfile{})
+	result := analyzeURL(serverURL.String(), client, nil, HTTPRequestProfile{}, nil)
 	if result.Error != "" || result.StatusCode != http.StatusOK {
 		t.Fatalf("expected redirect to use pinned loopback address, got %+v", result)
 	}
@@ -496,8 +496,8 @@ func TestAnalyzeURLPinsDNSAnswerAcrossSameHostRedirects(t *testing.T) {
 	if got := lookup.lookupCount(); got != 1 {
 		t.Fatalf("expected hostname to resolve once across redirect chain, got %d lookups", got)
 	}
-	if got := atomic.LoadInt32(&requests); got != 4 {
-		t.Fatalf("expected initial, redirected, and security.txt/robots.txt inspector requests, got %d", got)
+	if got := atomic.LoadInt32(&requests); got != 7 {
+		t.Fatalf("expected initial, redirected, and security.txt/robots.txt/graphql/swagger/openapi inspector requests, got %d", got)
 	}
 	if result.SecurityTxt == nil || result.RobotsTxt == nil {
 		t.Fatalf("expected inspector results, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
@@ -517,12 +517,12 @@ func TestAnalyzeURLStopsAfterFiveRedirects(t *testing.T) {
 	}
 	defer client.CloseIdleConnections()
 
-	result := analyzeURL(server.URL+"/start", client, nil, HTTPRequestProfile{})
+	result := analyzeURL(server.URL+"/start", client, nil, HTTPRequestProfile{}, nil)
 	if !strings.Contains(result.Error, "after five hops") {
 		t.Fatalf("expected five-hop redirect limit error, got %+v", result)
 	}
-	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+3 {
-		t.Fatalf("expected initial request, five redirects, and security.txt/robots.txt inspector requests, got %d requests", got)
+	if got := atomic.LoadInt32(&requests); got != maxHTTPRedirects+6 {
+		t.Fatalf("expected initial request, five redirects, and security.txt/robots.txt/graphql/swagger/openapi inspector requests, got %d requests", got)
 	}
 	if result.SecurityTxt == nil || result.RobotsTxt == nil {
 		t.Fatalf("expected inspector results on redirect-limit error, got security=%+v robots=%+v", result.SecurityTxt, result.RobotsTxt)
@@ -840,7 +840,7 @@ func TestAnalyzeURLInspectsSecurityTxtAndRobotsTxt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{}, nil)
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}
@@ -884,7 +884,7 @@ func TestAnalyzeURLReportsMissingSecurityTxtAndRobotsTxt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.CloseIdleConnections()
-	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{})
+	result := analyzeURL(server.URL, client, nil, HTTPRequestProfile{}, nil)
 	if result.Error != "" {
 		t.Fatalf("unexpected analysis error: %s", result.Error)
 	}

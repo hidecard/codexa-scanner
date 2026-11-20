@@ -304,7 +304,7 @@ func (a *App) EnumerateSubdomains(domain string, wordlist []string, brute bool) 
 	// Check for subdomain takeover clues (dangling CNAMEs)
 	r.TakeoverClues = checkTakeoverClues(r.Names)
 
-	_ = a.saveHistory("subdomain", d, r)
+	_ = a.saveHistory("subdomain", d, r, 0)
 	return r
 }
 
@@ -600,7 +600,7 @@ func (a *App) FuzzPaths(baseURL string, paths []string, concurrency int, request
 			r.Paths = append(r.Paths, results[i])
 		}
 	}
-	_ = a.saveHistory("fuzzer", u.String(), r)
+	_ = a.saveHistory("fuzzer", u.String(), r, 0)
 	return r
 }
 
@@ -693,7 +693,7 @@ func (a *App) InspectTLS(target string) TLSInspection {
 		inspectTLS12WeakCiphers(&out, host, addr)
 		inspectHTTP3Advertisement(&out, host, port)
 		probeLegacyTLS(&out, host, addr)
-		_ = a.saveHistory("tls", net.JoinHostPort(host, port), out)
+_ = a.saveHistory("tls", net.JoinHostPort(host, port), out, 0)
 		return out
 	}
 	defer conn.Close()
@@ -708,7 +708,7 @@ func (a *App) InspectTLS(target string) TLSInspection {
 	inspectTLS12WeakCiphers(&out, host, addr)
 	inspectHTTP3Advertisement(&out, host, port)
 	probeLegacyTLS(&out, host, addr)
-	_ = a.saveHistory("tls", net.JoinHostPort(host, port), out)
+	_ = a.saveHistory("tls", net.JoinHostPort(host, port), out, 0)
 	return out
 }
 
@@ -940,7 +940,7 @@ func (a *App) DNSIntelligence(domain string, includeRDAP bool) DNSIntelligenceRe
 	// Analyze email security policies
 	r.EmailPolicy = analyzeEmailPolicies(r.SPF, r.DMARC, r.DKIM)
 
-	_ = a.saveHistory("dns", d, r)
+	_ = a.saveHistory("dns", d, r, 0)
 	return r
 }
 
@@ -977,7 +977,7 @@ func (a *App) IPInformation(raw string) IPInformationResult {
 		r.Errors = append(r.Errors, "RDAP is not queried for private or special-use addresses")
 	}
 	sortStrings(r.ReverseDNS)
-	_ = a.saveHistory("ip", r.IP, r)
+	_ = a.saveHistory("ip", r.IP, r, 0)
 	return r
 }
 

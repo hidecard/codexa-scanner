@@ -27,15 +27,15 @@ func TestScanHistoryRecentEntriesAndJSON(t *testing.T) {
 	app := &App{historyDB: db}
 	first := []PortFinding{{Port: 22, Service: "SSH"}}
 	second := []PortFinding{{Port: 80, Service: "HTTP"}}
-	if err := app.saveHistory("port", "EXAMPLE.COM.", first); err != nil {
+	if err := app.saveHistory("port", "EXAMPLE.COM.", first, 0); err != nil {
 		t.Fatalf("save first history entry: %v", err)
 	}
 	// Ensure the ordering assertion does not depend on SQLite timestamp precision.
 	time.Sleep(2 * time.Millisecond)
-	if err := app.saveHistory("port", "example.com", second); err != nil {
+	if err := app.saveHistory("port", "example.com", second, 0); err != nil {
 		t.Fatalf("save second history entry: %v", err)
 	}
-	if err := app.saveHistory("http", "https://example.com", map[string]any{"ok": true}); err != nil {
+	if err := app.saveHistory("http", "https://example.com", map[string]any{"ok": true}, 0); err != nil {
 		t.Fatalf("save third history entry: %v", err)
 	}
 
@@ -71,13 +71,13 @@ func TestDiffLatestPortScansFindsNewAndRemovedPorts(t *testing.T) {
 
 	if err := app.saveHistory("port", "Host.Example.", []PortFinding{
 		{Port: 22}, {Port: 80}, {Port: 443},
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("save previous snapshot: %v", err)
 	}
 	time.Sleep(2 * time.Millisecond)
 	if err := app.saveHistory("port", "host.example", []PortFinding{
 		{Port: 22}, {Port: 443}, {Port: 8080}, {Port: 8443},
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("save latest snapshot: %v", err)
 	}
 
@@ -104,11 +104,11 @@ func TestSearchScanHistoryFiltersAndDeleteAndClear(t *testing.T) {
 	defer db.Close()
 	app := &App{historyDB: db}
 
-	_ = app.saveHistory("port", "alpha.example", []PortFinding{{Port: 80}})
+	_ = app.saveHistory("port", "alpha.example", []PortFinding{{Port: 80}}, 0)
 	time.Sleep(2 * time.Millisecond)
-	_ = app.saveHistory("http", "https://beta.example/path?token=secret", map[string]any{"ok": true})
+	_ = app.saveHistory("http", "https://beta.example/path?token=secret", map[string]any{"ok": true}, 0)
 	time.Sleep(2 * time.Millisecond)
-	_ = app.saveHistory("dns", "alpha.internal", map[string]any{"a": []string{"10.0.0.1"}})
+	_ = app.saveHistory("dns", "alpha.internal", map[string]any{"a": []string{"10.0.0.1"}}, 0)
 
 	if got := app.SearchScanHistory(10, "http", ""); len(got) != 1 || got[0].ScanType != "http" {
 		t.Fatalf("expected 1 http record, got %+v", got)
@@ -157,7 +157,7 @@ func TestSaveHistoryRedactsSensitiveURLAndKeys(t *testing.T) {
 			"ok":            "https://example.com/cb?code=123",
 		},
 	}
-	if err := app.saveHistory("http", "https://user:pass@example.com/path?token=abc", result); err != nil {
+	if err := app.saveHistory("http", "https://user:pass@example.com/path?token=abc", result, 0); err != nil {
 		t.Fatalf("save history: %v", err)
 	}
 	entries := app.SearchScanHistory(1, "http", "")
@@ -180,7 +180,7 @@ func TestSaveHistoryRedactsSensitiveURLAndKeys(t *testing.T) {
 
 func TestHistoryNoopWhenDatabaseUninitialized(t *testing.T) {
 	var app *App
-	if err := app.saveHistory("port", "localhost", []PortFinding{{Port: 80}}); err != nil {
+	if err := app.saveHistory("port", "localhost", []PortFinding{{Port: 80}}, 0); err != nil {
 		t.Fatalf("saveHistory should safely no-op for nil App: %v", err)
 	}
 	if got := app.GetScanHistory(5); len(got) != 0 {

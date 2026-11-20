@@ -74,6 +74,142 @@ export namespace main {
 	        this.dkim = source["dkim"];
 	    }
 	}
+	export class StorageKeyFinding {
+	    type: string;
+	    key: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageKeyFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.key = source["key"];
+	        this.source = source["source"];
+	    }
+	}
+	export class ScriptOriginFinding {
+	    origin: string;
+	    isThirdParty: boolean;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScriptOriginFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.origin = source["origin"];
+	        this.isThirdParty = source["isThirdParty"];
+	        this.url = source["url"];
+	    }
+	}
+	export class QueryParamFinding {
+	    name: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryParamFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.source = source["source"];
+	    }
+	}
+	export class InputFinding {
+	    name: string;
+	    type: string;
+	    autocomplete?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InputFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.autocomplete = source["autocomplete"];
+	    }
+	}
+	export class FormFinding {
+	    action: string;
+	    method: string;
+	    inputs?: InputFinding[];
+	    isLogin: boolean;
+	    context?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FormFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.method = source["method"];
+	        this.inputs = this.convertValues(source["inputs"], InputFinding);
+	        this.isLogin = source["isLogin"];
+	        this.context = source["context"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AttackSurfaceSummary {
+	    forms?: FormFinding[];
+	    queryParameters?: QueryParamFinding[];
+	    thirdPartyScripts?: ScriptOriginFinding[];
+	    storageKeys?: StorageKeyFinding[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AttackSurfaceSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.forms = this.convertValues(source["forms"], FormFinding);
+	        this.queryParameters = this.convertValues(source["queryParameters"], QueryParamFinding);
+	        this.thirdPartyScripts = this.convertValues(source["thirdPartyScripts"], ScriptOriginFinding);
+	        this.storageKeys = this.convertValues(source["storageKeys"], StorageKeyFinding);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class BilingualText {
 	    en: string;
 	    my: string;
@@ -196,6 +332,128 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class OAuthFinding {
+	    parameter: string;
+	    value?: string;
+	    redacted: string;
+	    context?: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OAuthFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.parameter = source["parameter"];
+	        this.value = source["value"];
+	        this.redacted = source["redacted"];
+	        this.context = source["context"];
+	        this.note = source["note"];
+	    }
+	}
+	export class WebhookFinding {
+	    platform: string;
+	    url: string;
+	    redacted: string;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WebhookFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.url = source["url"];
+	        this.redacted = source["redacted"];
+	        this.note = source["note"];
+	    }
+	}
+	export class WebhookOAuthAudit {
+	    webhooks?: WebhookFinding[];
+	    oauth?: OAuthFinding[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WebhookOAuthAudit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.webhooks = this.convertValues(source["webhooks"], WebhookFinding);
+	        this.oauth = this.convertValues(source["oauth"], OAuthFinding);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RateLimitAuditResult {
+	    hasRateLimitHeaders: boolean;
+	    rateLimitHeaders?: string;
+	    hasRetryAfter: boolean;
+	    retryAfter?: string;
+	    cacheControl?: string;
+	    missingNoStore: boolean;
+	    isSensitiveEndpoint: boolean;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RateLimitAuditResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hasRateLimitHeaders = source["hasRateLimitHeaders"];
+	        this.rateLimitHeaders = source["rateLimitHeaders"];
+	        this.hasRetryAfter = source["hasRetryAfter"];
+	        this.retryAfter = source["retryAfter"];
+	        this.cacheControl = source["cacheControl"];
+	        this.missingNoStore = source["missingNoStore"];
+	        this.isSensitiveEndpoint = source["isSensitiveEndpoint"];
+	        this.note = source["note"];
+	    }
+	}
+	export class CloudStorageFinding {
+	    url: string;
+	    provider: string;
+	    bucket?: string;
+	    listable: boolean;
+	    statusCode: number;
+	    error?: string;
+	    evidence?: string;
+	    remediation?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CloudStorageFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.provider = source["provider"];
+	        this.bucket = source["bucket"];
+	        this.listable = source["listable"];
+	        this.statusCode = source["statusCode"];
+	        this.error = source["error"];
+	        this.evidence = source["evidence"];
+	        this.remediation = source["remediation"];
+	    }
+	}
 	export class WebResourceInspector {
 	    url: string;
 	    statusCode: number;
@@ -304,6 +562,13 @@ export namespace main {
 	    tls?: TLSDetails;
 	    securityTxt?: WebResourceInspector;
 	    robotsTxt?: WebResourceInspector;
+	    graphql?: WebResourceInspector;
+	    swagger?: WebResourceInspector;
+	    openapi?: WebResourceInspector;
+	    cloudStorage?: CloudStorageFinding[];
+	    rateLimitAudit?: RateLimitAuditResult;
+	    webhookOAuth?: WebhookOAuthAudit;
+	    attackSurface?: AttackSurfaceSummary;
 	    clientSideAudit?: ClientSideAudit;
 	    findings: SecurityFinding[];
 	    advisoryMatches?: AdvisoryMatch[];
@@ -332,6 +597,13 @@ export namespace main {
 	        this.tls = this.convertValues(source["tls"], TLSDetails);
 	        this.securityTxt = this.convertValues(source["securityTxt"], WebResourceInspector);
 	        this.robotsTxt = this.convertValues(source["robotsTxt"], WebResourceInspector);
+	        this.graphql = this.convertValues(source["graphql"], WebResourceInspector);
+	        this.swagger = this.convertValues(source["swagger"], WebResourceInspector);
+	        this.openapi = this.convertValues(source["openapi"], WebResourceInspector);
+	        this.cloudStorage = this.convertValues(source["cloudStorage"], CloudStorageFinding);
+	        this.rateLimitAudit = this.convertValues(source["rateLimitAudit"], RateLimitAuditResult);
+	        this.webhookOAuth = this.convertValues(source["webhookOAuth"], WebhookOAuthAudit);
+	        this.attackSurface = this.convertValues(source["attackSurface"], AttackSurfaceSummary);
 	        this.clientSideAudit = this.convertValues(source["clientSideAudit"], ClientSideAudit);
 	        this.findings = this.convertValues(source["findings"], SecurityFinding);
 	        this.advisoryMatches = this.convertValues(source["advisoryMatches"], AdvisoryMatch);
@@ -357,6 +629,100 @@ export namespace main {
 		}
 	}
 	
+	
+	
+	export class CustomHeaderRule {
+	    id: string;
+	    name: string;
+	    header: string;
+	    match: string;
+	    severity: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomHeaderRule(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.header = source["header"];
+	        this.match = source["match"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	    }
+	}
+	export class CustomPathWordlist {
+	    id: string;
+	    name: string;
+	    paths: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomPathWordlist(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.paths = source["paths"];
+	    }
+	}
+	export class CustomSecretPattern {
+	    id: string;
+	    name: string;
+	    pattern: string;
+	    severity: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomSecretPattern(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.pattern = source["pattern"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	    }
+	}
+	export class CustomRulesFile {
+	    secretPatterns: CustomSecretPattern[];
+	    headerRules: CustomHeaderRule[];
+	    pathWordlists: CustomPathWordlist[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomRulesFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.secretPatterns = this.convertValues(source["secretPatterns"], CustomSecretPattern);
+	        this.headerRules = this.convertValues(source["headerRules"], CustomHeaderRule);
+	        this.pathWordlists = this.convertValues(source["pathWordlists"], CustomPathWordlist);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class DKIMAnalysis {
 	    recordsFound: number;
@@ -579,6 +945,201 @@ export namespace main {
 		}
 	}
 	
+	export class FindingNote {
+	    id: number;
+	    historyId: number;
+	    findingId: string;
+	    note: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new FindingNote(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.historyId = source["historyId"];
+	        this.findingId = source["findingId"];
+	        this.note = source["note"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FindingTag {
+	    id: number;
+	    historyId: number;
+	    findingId: string;
+	    tag: string;
+	    // Go type: time
+	    createdAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new FindingTag(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.historyId = source["historyId"];
+	        this.findingId = source["findingId"];
+	        this.tag = source["tag"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class HTTPInspectorRequest {
+	    url: string;
+	    method?: string;
+	    headers?: Record<string, string>;
+	    body?: string;
+	    allowPrivate?: boolean;
+	    timeoutSeconds?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new HTTPInspectorRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.method = source["method"];
+	        this.headers = source["headers"];
+	        this.body = source["body"];
+	        this.allowPrivate = source["allowPrivate"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class HTTPInspectorRequestDebug {
+	    url: string;
+	    method: string;
+	    headers: Record<string, string>;
+	    body?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HTTPInspectorRequestDebug(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.method = source["method"];
+	        this.headers = source["headers"];
+	        this.body = source["body"];
+	    }
+	}
+	export class HTTPInspectorResponseDebug {
+	    statusCode: number;
+	    headers: Record<string, string>;
+	    body?: string;
+	    bodyTruncated?: boolean;
+	    tls?: TLSDetails;
+	
+	    static createFrom(source: any = {}) {
+	        return new HTTPInspectorResponseDebug(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statusCode = source["statusCode"];
+	        this.headers = source["headers"];
+	        this.body = source["body"];
+	        this.bodyTruncated = source["bodyTruncated"];
+	        this.tls = this.convertValues(source["tls"], TLSDetails);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class HTTPInspectorResponse {
+	    request?: HTTPInspectorRequestDebug;
+	    response?: HTTPInspectorResponseDebug;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HTTPInspectorResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.request = this.convertValues(source["request"], HTTPInspectorRequestDebug);
+	        this.response = this.convertValues(source["response"], HTTPInspectorResponseDebug);
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class HistoryEntry {
 	    id: number;
 	    scanType: string;
@@ -658,6 +1219,28 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	export class NmapImportResult {
+	    hostsProcessed: number;
+	    hostsUp: number;
+	    portsFound: number;
+	    webEndpointsFound: number;
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new NmapImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hostsProcessed = source["hostsProcessed"];
+	        this.hostsUp = source["hostsUp"];
+	        this.portsFound = source["portsFound"];
+	        this.webEndpointsFound = source["webEndpointsFound"];
+	        this.errors = source["errors"];
+	    }
+	}
+	
 	export class PathFinding {
 	    url: string;
 	    statusCode: number;
@@ -712,6 +1295,11 @@ export namespace main {
 	    port: number;
 	    service: string;
 	    banner: string;
+	    protocol?: string;
+	    version?: string;
+	    fingerprint?: string;
+	    tlsSupported?: boolean;
+	    tlsCipher?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PortFinding(source);
@@ -722,6 +1310,11 @@ export namespace main {
 	        this.port = source["port"];
 	        this.service = source["service"];
 	        this.banner = source["banner"];
+	        this.protocol = source["protocol"];
+	        this.version = source["version"];
+	        this.fingerprint = source["fingerprint"];
+	        this.tlsSupported = source["tlsSupported"];
+	        this.tlsCipher = source["tlsCipher"];
 	    }
 	}
 	export class PortScanDiff {
@@ -764,6 +1357,8 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	
 	
 	
 	export class StackFix {
@@ -893,6 +1488,26 @@ export namespace main {
 	
 	
 	
+	
+	
+	export class SubdomainImportResult {
+	    subdomainsLoaded: number;
+	    duplicatesRemoved: number;
+	    invalidEntries: number;
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SubdomainImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subdomainsLoaded = source["subdomainsLoaded"];
+	        this.duplicatesRemoved = source["duplicatesRemoved"];
+	        this.invalidEntries = source["invalidEntries"];
+	        this.errors = source["errors"];
+	    }
+	}
 	export class TakeoverClue {
 	    subdomain: string;
 	    cnameTarget: string;
@@ -1138,5 +1753,46 @@ export namespace main {
 		}
 	}
 	
+	
+	
+	
+	export class Workspace {
+	    id: number;
+	    name: string;
+	    description: string;
+	    // Go type: time
+	    createdAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Workspace(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
+
