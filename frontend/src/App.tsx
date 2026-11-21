@@ -50,8 +50,8 @@ import {
 } from '../wailsjs/go/main/App';
 import { EventsOn, EventsOff, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { main } from '../wailsjs/go/models';
-
-type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about' | 'cvefeed';
+import { AssetTreeNode, assetTreeToSVG, buildAssetTree, filterAssetTree } from './assetTree';
+type ActiveTab = 'dashboard' | 'scanner' | 'analyzer' | 'subdomains' | 'fuzzer' | 'tls' | 'dns' | 'ip' | 'history' | 'assetTree' | 'playbook' | 'workspaces' | 'import' | 'inspector' | 'about' | 'cvefeed';
 type GuideLang = 'en' | 'my';
 
 type NavGroup = 'dashboard' | 'network' | 'web' | 'assessment' | 'reports' | 'settings';
@@ -75,6 +75,7 @@ const NAV_GROUPS: Record<NavGroup, { label: string; tabs: { id: ActiveTab; label
   ] },
   reports: { label: 'Reports & History', tabs: [
     { id: 'history', label: 'History' },
+    { id: 'assetTree', label: 'Asset Tree' },
     { id: 'playbook', label: 'Playbook' },
   ] },
   settings: { label: 'Settings', tabs: [
@@ -120,6 +121,26 @@ function verificationCommands(result: main.BulkHeaderResult): { label: string; c
     commands.push({ label: 'DNS records', command: `dig ${shellQuote(host)} A +noall +answer && dig ${shellQuote(host)} TXT +noall +answer` });
   }
   return commands;
+}
+
+function AssetTreeBranch({ node, depth, expanded, onToggle, onSelect }: { node: AssetTreeNode; depth: number; expanded: Set<string>; onToggle: (id: string) => void; onSelect: (node: AssetTreeNode) => void }) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expanded.has(node.id);
+  const statusColor = node.status && /critical|high|unclaimed|open/i.test(node.status) ? 'text-rose-300' : node.status ? 'text-amber-300' : 'text-slate-500';
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: `${depth * 16}px` }}>
+        {hasChildren ? <button type="button" onClick={() => onToggle(node.id)} className="w-5 shrink-0 rounded text-slate-400 hover:bg-slate-800" aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.label}`}>{isExpanded ? '▾' : '▸'}</button> : <span className="w-5 shrink-0" />}
+        <button type="button" onClick={() => onSelect(node)} className="min-w-0 flex-1 rounded px-2 py-1 text-left text-xs hover:bg-slate-800">
+          <span className={`mr-2 inline-block rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase ${node.type === 'root' ? 'text-emerald-300' : node.type === 'finding' || node.type === 'cve' ? 'text-rose-300' : 'text-sky-300'}`}>{node.type}</span>
+          <span className="break-all text-slate-200">{node.label}</span>
+          {node.status && <span className={`ml-2 ${statusColor}`}>{node.status}</span>}
+          {node.meta && <span className="ml-2 break-all text-[11px] text-slate-500">{node.meta}</span>}
+        </button>
+      </div>
+      {hasChildren && isExpanded && <div>{node.children.map((child) => <AssetTreeBranch key={child.id} node={child} depth={depth + 1} expanded={expanded} onToggle={onToggle} onSelect={onSelect} />)}</div>}
+    </div>
+  );
 }
 
 export default function App() {
@@ -197,6 +218,9 @@ export default function App() {
   const [ipResult, setIpResult] = useState<main.IPInformationResult | null>(null);
   const [historyTarget, setHistoryTarget] = useState('scanme.nmap.org');
   const [historyEntries, setHistoryEntries] = useState<main.HistoryEntry[]>([]);
+  const [assetTreeQuery, setAssetTreeQuery] = useState('');
+  const [assetTreeExpanded, setAssetTreeExpanded] = useState<Set<string>>(new Set());
+  const [assetTreeSelected, setAssetTreeSelected] = useState<AssetTreeNode | null>(null);
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<number[]>([]);
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'port' | 'http' | 'subdomain' | 'fuzzer' | 'tls' | 'dns' | 'ip'>('all');
@@ -227,6 +251,7 @@ export default function App() {
   const [findingDrawerId, setFindingDrawerId] = useState<string | null>(null);
   const [findingDrawerHistoryId, setFindingDrawerHistoryId] = useState<number | null>(null);
   const selectedHistoryEntries = historyEntries.filter((entry) => selectedHistoryIds.includes(entry.id));
+  const assetTreeNodes = filterAssetTree(buildAssetTree(historyEntries), assetTreeQuery);
   const [detectedTechStack, setDetectedTechStack] = useState('Next.js');
 
   // Phase 15 - Import & HTTP Inspector
@@ -705,6 +730,56 @@ export default function App() {
     if (format === 'json') void ExportJSON(filename, payload);
     else void ExportPDF(filename, payload);
   };
+  const toggleAssetTreeNode = (id: string) => {
+    setAssetTreeExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAssetTreeNode = (node: AssetTreeNode) => {
+    setAssetTreeSelected(node);
+    if (node.findingId) {
+      setFindingDrawerId(node.findingId);
+      setFindingDrawerHistoryId(node.historyId ?? null);
+    }
+  };
+  const expandAllAssetTree = () => {
+    const ids = new Set<string>();
+    const visit = (nodes: AssetTreeNode[]) => nodes.forEach((node) => { ids.add(node.id); visit(node.children); });
+    visit(assetTreeNodes);
+    setAssetTreeExpanded(ids);
+  };
+  const downloadAssetTreeFile = (filename: string, content: string | Blob, type: string) => {
+    const blob = content instanceof Blob ? content : new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const exportAssetTreeSVG = () => downloadAssetTreeFile('codexa-asset-tree.svg', assetTreeToSVG(assetTreeNodes), 'image/svg+xml');
+  const exportAssetTreeJSON = () => downloadAssetTreeFile('codexa-asset-tree.json', JSON.stringify(assetTreeNodes, null, 2), 'application/json');
+  const exportAssetTreePNG = async () => {
+    const svgBlob = new Blob([assetTreeToSVG(assetTreeNodes)], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(svgBlob);
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1400;
+      canvas.height = Math.max(120, assetTreeNodes.length * 120 + 64);
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.fillStyle = '#020617';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => { if (blob) downloadAssetTreeFile('codexa-asset-tree.png', blob, 'image/png'); }, 'image/png');
+      }
+      URL.revokeObjectURL(url);
+    };
+    image.src = url;
+  };
 
   useEffect(() => {
     void refreshHistory();
@@ -1059,7 +1134,7 @@ ${rows || '<p>No results.</p>'}
                 <button
                   key={group}
                   type="button"
-                  onClick={() => { setActiveTab(tab.id); if (tab.id === 'history') void refreshHistory(); if (tab.id === 'workspaces') void loadWorkspaces(); }}
+                  onClick={() => { setActiveTab(tab.id); if (tab.id === 'history' || tab.id === 'assetTree') void refreshHistory(); if (tab.id === 'workspaces') void loadWorkspaces(); }}
                   aria-pressed={activeTab === tab.id}
                   className={`rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                     activeTab === tab.id ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/60' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -1105,6 +1180,7 @@ ${rows || '<p>No results.</p>'}
                         onClick={(e) => {
                           e.stopPropagation();
                           setActiveTab(tab.id);
+                          if (tab.id === 'assetTree') void refreshHistory();
                           setExpandedGroups((prev) => {
                             const next = new Set(prev);
                             next.delete(group);
@@ -2272,6 +2348,48 @@ return (
             {ipResult.rdap && <div className="rounded bg-slate-950 p-3 text-xs"><div className="mb-1 text-[11px] font-bold text-emerald-300">RDAP registration metadata</div><div>Network handle: {ipResult.rdap.networkHandle || 'unknown'}</div><div>Network name: {ipResult.rdap.name || 'unknown'}</div><div>Registry country field: {ipResult.rdap.country || 'not supplied'}</div><div className="mt-1 text-[11px] text-slate-500">Source: {ipResult.rdap.source}</div></div>}
             <div className="text-[11px] text-slate-500">Sources: {ipResult.sources.join(' · ')}</div>
           </div>}
+        </div>
+      )}
+      {activeTab === 'assetTree' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold">Visual Attack Surface</h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">Read-only tree built from locally stored scan history. It groups roots, subdomains, open services, web endpoints, technologies, API/config clues, CVE matches, TLS and DNS observations. It does not run new scans.</p>
+              </div>
+              <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-400">{assetTreeNodes.length} root(s) · {historyEntries.length} history record(s)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input value={assetTreeQuery} onChange={(event) => setAssetTreeQuery(event.target.value)} placeholder="Filter assets, technologies, CVEs…" className="min-h-10 min-w-[220px] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs" />
+              <button type="button" onClick={expandAllAssetTree} disabled={!assetTreeNodes.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Expand all</button>
+              <button type="button" onClick={() => setAssetTreeExpanded(new Set())} disabled={!assetTreeNodes.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Collapse all</button>
+              <button type="button" onClick={exportAssetTreeJSON} disabled={!assetTreeNodes.length} className="min-h-10 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold disabled:opacity-40">Export JSON</button>
+              <button type="button" onClick={exportAssetTreeSVG} disabled={!assetTreeNodes.length} className="min-h-10 rounded-lg border border-sky-800 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-300 disabled:opacity-40">Export SVG</button>
+              <button type="button" onClick={() => void exportAssetTreePNG()} disabled={!assetTreeNodes.length} className="min-h-10 rounded-lg border border-sky-800 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-300 disabled:opacity-40">Export PNG</button>
+            </div>
+          </div>
+          {!assetTreeNodes.length ? (
+            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center text-xs text-slate-400">No matching asset data. Run or import an authorized scan, then refresh History.</div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4">
+                {assetTreeNodes.map((node) => <AssetTreeBranch key={node.id} node={node} depth={0} expanded={assetTreeExpanded} onToggle={toggleAssetTreeNode} onSelect={selectAssetTreeNode} />)}
+              </div>
+              <aside className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <h3 className="text-sm font-bold">Selected node</h3>
+                {assetTreeSelected ? (
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="rounded bg-slate-950 p-3"><div className="text-[10px] uppercase text-slate-500">Type</div><div className="mt-1 text-sky-300">{assetTreeSelected.type}</div></div>
+                    <div className="rounded bg-slate-950 p-3"><div className="text-[10px] uppercase text-slate-500">Asset</div><div className="mt-1 break-all text-slate-200">{assetTreeSelected.label}</div></div>
+                    {assetTreeSelected.status && <div className="rounded bg-slate-950 p-3"><div className="text-[10px] uppercase text-slate-500">Status</div><div className="mt-1 text-amber-300">{assetTreeSelected.status}</div></div>}
+                    {assetTreeSelected.meta && <div className="rounded bg-slate-950 p-3"><div className="text-[10px] uppercase text-slate-500">Metadata</div><div className="mt-1 break-all text-slate-400">{assetTreeSelected.meta}</div></div>}
+                    {assetTreeSelected.findingId && <button type="button" onClick={() => { setFindingDrawerId(assetTreeSelected.findingId || null); setFindingDrawerHistoryId(assetTreeSelected.historyId ?? null); }} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500">Open remediation guide</button>}
+                  </div>
+                ) : <p className="mt-3 text-xs leading-relaxed text-slate-500">Click a node to inspect its metadata. Finding and CVE-linked nodes can open the remediation drawer where a guide is available.</p>}
+              </aside>
+            </div>
+          )}
         </div>
       )}
       {activeTab === 'history' && (
