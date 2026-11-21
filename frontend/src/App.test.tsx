@@ -139,6 +139,23 @@ describe('App Component - Critical Flows', () => {
     });
   });
 
+  describe('Rate limiter controls', () => {
+    it('should allow bounded Web Audit RPS and jitter values', () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByRole('button', { name: /web security/i }));
+      fireEvent.click(screen.getByText('Web Audit', { exact: true }));
+
+      const zeroInputs = screen.getAllByDisplayValue('0');
+      expect(zeroInputs.length).toBeGreaterThanOrEqual(2);
+      fireEvent.change(zeroInputs[0], { target: { value: '25' } });
+      fireEvent.change(zeroInputs[1], { target: { value: '150' } });
+
+      expect(screen.getByDisplayValue('25')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('150')).toBeInTheDocument();
+    });
+  });
+
   describe('Workspace CRUD', () => {
     it('should show workspaces tab', async () => {
       render(<App />);
