@@ -146,5 +146,16 @@ describe('App Component - Critical Flows', () => {
       expect(screen.getByRole('button', { name: /reports & history/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /settings/i })).toBeInTheDocument();
     });
+
+    it('should open the Visual Attack Surface Asset Tree view', () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByRole('button', { name: /reports & history/i }));
+      fireEvent.click(screen.getByText('Asset Tree', { exact: true }));
+
+      expect(screen.getByRole('heading', { name: /visual attack surface/i })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/filter assets/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /export json/i })).toBeDisabled();
+    });
   });
 });
