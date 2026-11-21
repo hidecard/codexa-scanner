@@ -105,6 +105,38 @@ describe('App Component - Critical Flows', () => {
       const paletteButton = screen.getByTitle(/command palette/i);
       expect(paletteButton).toBeInTheDocument();
     });
+
+    it('should navigate to Asset Tree from the palette', () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByTitle(/command palette/i));
+      const paletteInput = screen.getByPlaceholderText(/go to module or action/i);
+      expect(paletteInput).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^asset tree module$/i }));
+
+      expect(screen.getByRole('heading', { name: /visual attack surface/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Scope confirmation', () => {
+    it('should keep live scan disabled until the exact scope is confirmed and reset on target change', () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByRole('button', { name: /assessment/i }));
+      fireEvent.click(screen.getByText('Ports', { exact: true }));
+
+      const startButton = screen.getByRole('button', { name: /start live scan/i });
+      const confirmation = screen.getAllByRole('checkbox')[0];
+      expect(startButton).toBeDisabled();
+
+      fireEvent.click(confirmation);
+      expect(startButton).not.toBeDisabled();
+
+      const targetInput = screen.getByDisplayValue('scanme.nmap.org');
+      fireEvent.change(targetInput, { target: { value: 'example.com' } });
+      expect(confirmation).not.toBeChecked();
+      expect(startButton).toBeDisabled();
+    });
   });
 
   describe('Workspace CRUD', () => {

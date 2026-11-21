@@ -2486,14 +2486,14 @@ return (
                 if (isSingleTab) {
                   const tab = groupData.tabs[0];
                   return (
-                    <button key={group} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
+                    <button key={group} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history' || tab.id==='assetTree') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
                   );
                 }
                 return (
                   <div key={group}>
                     <span className="px-3 py-1 text-[11px] text-slate-500">{groupData.label}</span>
                     {groupData.tabs.map((tab) => (
-                      <button key={tab.id} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
+                      <button key={tab.id} type="button" onClick={()=>{ setActiveTab(tab.id); if(tab.id==='history' || tab.id==='assetTree') void refreshHistory(); if(tab.id==='workspaces') void loadWorkspaces(); setCommandPaletteOpen(false); }} className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-800">{tab.label} <span className="text-xs text-slate-500">module</span></button>
                     ))}
                   </div>
                 );
